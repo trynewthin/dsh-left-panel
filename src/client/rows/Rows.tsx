@@ -159,7 +159,10 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {row.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
+        {/* A repository is a directory; a worktree under it is a checkout of a branch. */}
+        {nested
+          ? <IconBranchOutline16 />
+          : row.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
         <IconTriangleRightFill14 className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
@@ -290,7 +293,7 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
       onClick={onToggle}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        <IconBranchOutline16 />
+        {section.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
         <IconTriangleRightFill14 className={clsx(css.arrow, section.expanded && css.arrowOpen)} />
@@ -369,7 +372,7 @@ export function GhostWorktreeItem({ worktree, busy, onRegister, onUnignore, t }:
   const ownRow = (
     <div className={clsx(css.projectRow, css.nestedRow, css.ghostRow)} role="treeitem" aria-disabled="true">
       <span className={clsx(css.slot, css.folder)}>
-        <IconFolderClose16 />
+        <IconBranchOutline16 />
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{worktree.title}</span>

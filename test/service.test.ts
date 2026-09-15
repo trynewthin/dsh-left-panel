@@ -26,16 +26,39 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 
 type Listener = (change: DomainChanged) => void
 
+/** One stored session as the persistence stub reports it. */
+interface StoredSession {
+  readonly id: string
+  readonly cwd: string
+}
+
 class FakeWorkspace {
   readonly createdAt = new Date().toISOString()
   updatedAt = this.createdAt
-  readonly sessionIds: readonly string[] = []
+  private readonly ids: string[] = []
   constructor(
     private readonly registry: FakeRegistry,
     readonly id: string,
     readonly path: string,
     public title: string,
   ) {}
+
+  /** Mirrors the real membership rule: a session attaches only when its canonical cwd is this directory. */
+  get sessionIds(): readonly string[] {
+    const accounted = new Set(this.ids)
+    return this.registry.sessions
+      .filter(session => accounted.has(session.id) && session.cwd === this.path)
+      .map(session => session.id)
+  }
+
+  async attachSession(sessionId: string): Promise<void> {
+    const session = this.registry.sessions.find(candidate => candidate.id === sessionId)
+    if (session === undefined) throw new Error(`unknown session "${sessionId}"`)
+    if (session.cwd !== this.path) {
+      throw new Error(`session "${sessionId}" its cwd resolves to '${session.cwd}', not '${this.path}'`)
+    }
+    if (!this.ids.includes(sessionId)) this.ids.push(sessionId)
+  }
 
   async setTitle(title: string): Promise<void> {
     this.title = title
@@ -48,6 +71,8 @@ class FakeRegistry {
   readonly byId = new Map<string, FakeWorkspace>()
   readonly listeners = new Set<Listener>()
   private counter = 0
+
+  constructor(readonly sessions: StoredSession[]) {}
 
   emit(change: DomainChanged): void {
     for (const listener of this.listeners) listener(change)
@@ -132,6 +157,10 @@ function createHarness(registry: FakeRegistry, stateFile: string): Harness {
         },
       },
     },
+    sessionPersistence: {
+      // Header shape only: the service reads id + cwd.
+      list: async () => registry.sessions.map(session => ({ header: { id: session.id, cwd: session.cwd }, revision: 'rev' })),
+    },
     workspaceRegistry: registry,
   }
   const service = new WorktreeSyncService(ctx as unknown as ConstructorParameters<typeof WorktreeSyncService>[0], {
@@ -180,7 +209,11 @@ test('worktree sync end to end against a real repository', async (t) => {
   const featPath = join(root, 'wt-feat')
   await git(repo, 'worktree', 'add', '-q', '-b', 'feat/x', featPath)
 
-  const registry = new FakeRegistry()
+  const registry = new FakeRegistry([
+    // A session that already lived in the linked worktree before its Workspace
+    // existed: it sat under Ungrouped and must be adopted on registration.
+    { id: 'session-orphan', cwd: await realpath(featPath) },
+  ])
   const main = await registry.create(repo, 'repo')
   const harness = createHarness(registry, join(root, 'state.json'))
   t.after(() => { harness.dispose() })
@@ -201,6 +234,14 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.deepEqual(repoInfo.worktrees.map(w => [w.title, w.main, w.workspaceId !== null]), [['main', true, true], ['feat/x', false, true]])
     assert.equal(snapshot.workspaceRepo[main.id], repoInfo.key)
     assert.equal(snapshot.workspaceRepo[feat.id], repoInfo.key)
+  })
+
+  await t.test('adopts a session that already lived in the worktree directory', async () => {
+    const feat = await registry.resolveByPath(featPath)
+    assert.ok(feat)
+    assert.deepEqual(feat.sessionIds, ['session-orphan'])
+    // A session from another directory is never adopted, even if offered.
+    await assert.rejects(feat.attachSession('session-elsewhere'))
   })
 
   await t.test('follows a branch switch while the plugin-assigned title is untouched', async () => {

@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { WorktreeSyncService } from './service.ts'
 
 export const name = 'left-panel'
-export const inject = ['workspaceRegistry', 'connection', 'webServer']
+export const inject = ['workspaceRegistry', 'connection', 'webServer', 'sessionPersistence']
 
 export async function apply(ctx: Context): Promise<void> {
   const service = new WorktreeSyncService(ctx)

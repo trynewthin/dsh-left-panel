@@ -12,8 +12,10 @@ import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionFetchRoute, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-workspace'
 
@@ -303,6 +305,14 @@ export class WorktreeSyncService {
     const known = new Map(plan.knownWorktrees)
     const titles: Record<string, string> = { ...state.autoTitles }
     const released = new Set(plan.releaseIgnored)
+    // Sessions that already live in a worktree directory predate its Workspace
+    // registration (they sat under Ungrouped). Membership is the Workspace's
+    // durable session ledger, so a registered worktree adopts them explicitly;
+    // attachSession re-validates the canonical cwd, so this can never move a
+    // session into the wrong directory.
+    const ungrouped = plan.actions.some(action => action.type === 'create')
+      ? await this.sessionsByDirectory()
+      : new Map<string, readonly SessionId[]>()
     for (const action of plan.actions) {
       switch (action.type) {
         case 'create': {
@@ -312,6 +322,7 @@ export class WorktreeSyncService {
             titles[action.path] = action.title
             await this.placeAfterRepo(workspace.id, action.repoKey, action.mainWorkspaceId)
             this.ctx.logger.info(`left-panel: registered worktree ${action.path} as "${action.title}"`)
+            await this.adoptExistingSessions(workspace, ungrouped.get(action.path) ?? [])
           } catch (error) {
             this.ctx.logger.warn(`left-panel: could not register ${action.path}: ${String(error)}`)
           }
@@ -350,6 +361,41 @@ export class WorktreeSyncService {
       autoTitles: titles,
     }
     if (!sameState(state, next)) await this.store.update(() => next)
+  }
+
+  /** Stored sessions grouped by canonical cwd, for adopting orphans into a new worktree Workspace. */
+  private async sessionsByDirectory(): Promise<Map<string, SessionId[]>> {
+    const byPath = new Map<string, SessionId[]>()
+    try {
+      for (const snapshot of await this.ctx.sessionPersistence.list()) {
+        const cwd = snapshot.header.cwd
+        if (typeof cwd !== 'string' || cwd === '') continue
+        const path = await canonical(cwd)
+        const ids = byPath.get(path)
+        if (ids === undefined) byPath.set(path, [snapshot.header.id])
+        else ids.push(snapshot.header.id)
+      }
+    } catch (error) {
+      this.ctx.logger.warn(`left-panel: could not list stored sessions: ${String(error)}`)
+    }
+    return byPath
+  }
+
+  /** Attach sessions whose immutable cwd is this worktree; attachSession rejects any mismatch. */
+  private async adoptExistingSessions(workspace: Workspace, candidates: readonly SessionId[]): Promise<void> {
+    let adopted = 0
+    for (const sessionId of candidates) {
+      if (workspace.sessionIds.includes(sessionId)) continue
+      try {
+        await workspace.attachSession(sessionId)
+        adopted += 1
+      } catch (error) {
+        this.ctx.logger.warn(`left-panel: could not attach ${sessionId} to ${workspace.path}: ${String(error)}`)
+      }
+    }
+    if (adopted > 0) {
+      this.ctx.logger.info(`left-panel: adopted ${adopted} pre-existing session(s) into ${workspace.path}`)
+    }
   }
 
   /** Keep a repository's worktree Workspaces adjacent in the durable order: right after the last one already placed. */
@@ -454,6 +500,7 @@ export class WorktreeSyncService {
               const main = found.repo.worktrees.find(candidate => candidate.main)
               const mainWorkspaceId = main === undefined ? undefined : this.registry.find(entry => entry.path === main.path)?.id
               await this.placeAfterRepo(workspace.id, found.repo.key, mainWorkspaceId)
+              await this.adoptExistingSessions(workspace, (await this.sessionsByDirectory()).get(worktree.path) ?? [])
             }
           }
           await this.syncNow()
