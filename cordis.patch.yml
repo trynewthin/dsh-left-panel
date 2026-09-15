@@ -1,0 +1,5 @@
+# Registers this package as a bundle in the target dsh profile.
+# `id` must be unique within the profile; `name` must match package.json.
+- insert:
+    - id: left-panel
+      name: dsh-left-panel

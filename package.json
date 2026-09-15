@@ -1,0 +1,104 @@
+{
+  "name": "dsh-left-panel",
+  "version": "0.1.0",
+  "description": "Git worktree-aware workspace browser for the DeepSeek Harness Web sidebar: repositories group their checked-out worktrees, and worktree workspaces are registered and unregistered automatically.",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "git",
+    "worktree"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "clean": "rm -rf lib",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "pnpm clean && pnpm build:host && pnpm build:client",
+    "build:host": "tsc -p tsconfig.build.json",
+    "build:client": "tsdown",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepare": "pnpm build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "external": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.5-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-workspace": ">=0.1.5-rc.1 <0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-connection": { "optional": true },
+    "@deepseek-ai/dsh-workspace": { "optional": true }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-api-remotes": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-schedule": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-util-workspace-path": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-workspace": "0.1.5-rc.2",
+    "@types/node": "^22.20.1",
+    "@types/react": "~18.3.31",
+    "clsx": "^2.1.1",
+    "lightningcss": "^1.33.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.23.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}
