@@ -671,9 +671,12 @@ function SessionTree({
                 : (e) => {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'move'
+                  // React clears currentTarget after the handler returns. Read
+                  // the geometry before the state updater is allowed to run.
+                  const half = workspaceGroupHalf(e)
                   setWorkspaceDrag(active => (active === null ? active : {
                     ...active,
-                    over: { ids: section.workspaceIds, half: workspaceGroupHalf(e) },
+                    over: { ids: section.workspaceIds, half },
                   }))
                 }}
               onDrop={workspaceDrag === null || anchorId === undefined
