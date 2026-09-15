@@ -29,7 +29,7 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SessionNode, SessionOrderBy, TreeSection } from '../tree.ts'
 import {
   arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, planWorkspaceMove,
-  repoGroupKey, UNGROUPED_KEY,
+  repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
 } from '../tree.ts'
 import { ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
@@ -230,6 +230,8 @@ interface DragState {
 interface WorkspaceDragState {
   /** Workspace ids the drag carries, in durable order. */
   ids: readonly string[]
+  /** Repository boundary for a nested worktree drag; absent for top-level section drags. */
+  repoKey?: string | undefined
   /** Entire target section, so dropping after a repository clears all of its worktrees. */
   over: { ids: readonly string[]; half: 'before' | 'after' } | null
 }
@@ -463,21 +465,18 @@ function SessionTree({
       }
     })().catch((reason: unknown) => { console.warn('workspace reorder rejected:', reason) })
   }
-  /**
-   * One Workspace group: header row + expanded top-level session rows. Nested
-   * worktree groups are not draggable — their position follows the repository.
-   */
-  const renderGroup = (group: GroupNode, nested: boolean) => {
+  /** One Workspace group: header row + expanded top-level session rows. */
+  const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
     const workspaceId = group.workspaceId
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
-    const workspaceMarker = !nested && workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
+    const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
       ? workspaceDrag.over.half
       : null
-    const workspaceDragProps = workspaceId === undefined || nested ? undefined : {
+    const workspaceDragProps = workspaceId === undefined ? undefined : {
       start: () => {
         workspaceDropCommitted.current = false
-        setWorkspaceDrag({ ids: [workspaceId as string], over: null })
+        setWorkspaceDrag({ ids: [workspaceId as string], ...(nested ? { repoKey } : {}), over: null })
       },
       end: () => {
         if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
@@ -488,14 +487,16 @@ function SessionTree({
         workspaceDropCommitted.current = false
       },
     }
-    const hoverWorkspace = workspaceId === undefined || nested
+    const acceptsWorkspaceDrag = workspaceId !== undefined && workspaceDrag !== null
+      && workspaceDropAllowed(workspaceDrag.repoKey, nested ? repoKey : undefined)
+    const hoverWorkspace = !acceptsWorkspaceDrag
       ? undefined
       : (half: 'before' | 'after') => {
         setWorkspaceDrag(active => active === null
           ? active
           : { ...active, over: { ids: [workspaceId], half } })
       }
-    const dropWorkspace = workspaceId === undefined || nested
+    const dropWorkspace = !acceptsWorkspaceDrag
       ? undefined
       : (half: 'before' | 'after') => {
         if (workspaceDrag === null) return
@@ -517,6 +518,7 @@ function SessionTree({
           ? undefined
           : (e) => {
             e.preventDefault()
+            if (nested) e.stopPropagation()
             e.dataTransfer.dropEffect = 'move'
             hoverWorkspace(workspaceGroupHalf(e))
           }}
@@ -524,6 +526,7 @@ function SessionTree({
           ? undefined
           : (e) => {
             e.preventDefault()
+            if (nested) e.stopPropagation()
             dropWorkspace(workspaceGroupHalf(e))
           }}
       >
@@ -622,6 +625,7 @@ function SessionTree({
     return first.kind === 'group' ? (first.group.workspaceId as string | undefined) : first.workspaceIds[0]
   })()
   const workspaceDropAtListStart = firstRowId !== undefined
+    && workspaceDrag?.repoKey === undefined
     && workspaceDrag?.over?.ids[0] === firstRowId
     && workspaceDrag.over.half === 'before'
 
@@ -641,7 +645,8 @@ function SessionTree({
           // The node is reordered by moving its Workspaces as one block, so the
           // durable Host order still reads sensibly outside this plugin.
           const anchorId = section.workspaceIds[0]
-          const sectionMarker = anchorId !== undefined && workspaceDrag?.over?.ids.includes(anchorId)
+          const sectionMarker = workspaceDrag?.repoKey === undefined
+            && anchorId !== undefined && workspaceDrag?.over?.ids.includes(anchorId)
             ? workspaceDrag.over.half
             : null
           const nodeDrag = anchorId === undefined ? undefined : {
@@ -666,7 +671,7 @@ function SessionTree({
                 sectionMarker === 'before' && css.workspaceDropBefore,
                 sectionMarker === 'after' && css.workspaceDropAfter,
               )}
-              onDragOver={workspaceDrag === null || anchorId === undefined
+              onDragOver={workspaceDrag === null || workspaceDrag.repoKey !== undefined || anchorId === undefined
                 ? undefined
                 : (e) => {
                   e.preventDefault()
@@ -679,7 +684,7 @@ function SessionTree({
                     over: { ids: section.workspaceIds, half },
                   }))
                 }}
-              onDrop={workspaceDrag === null || anchorId === undefined
+              onDrop={workspaceDrag === null || workspaceDrag.repoKey !== undefined || anchorId === undefined
                 ? undefined
                 : (e) => {
                   e.preventDefault()
@@ -695,7 +700,7 @@ function SessionTree({
                 onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
                 onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
               />
-              {section.expanded && section.groups.map(group => renderGroup(group, true))}
+              {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
             </div>
           )
         })}
@@ -1135,8 +1140,12 @@ export function WorkspaceBrowser({
   const [renaming, setRenaming] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
   const renameTrimmed = renameDraft.trim()
+  const renameRepoKey = renameTarget === null
+    ? undefined
+    : snapshot.workspaceRepo[renameTarget.workspaceId as string]
   const renameDuplicate = renameTarget !== null && renameTrimmed !== '' && renameTrimmed !== renameTarget.currentTitle
-    && workspaces.some(w => w.title === renameTrimmed)
+    && workspaces.some(w => w.workspaceId !== renameTarget.workspaceId && w.title === renameTrimmed
+      && (renameRepoKey === undefined || snapshot.workspaceRepo[w.workspaceId as string] === renameRepoKey))
   const renameBlocked = renaming || renameTrimmed === ''
     || renameTarget === null || renameTrimmed === renameTarget.currentTitle || renameDuplicate
   const closeRename = () => {
@@ -1148,7 +1157,10 @@ export function WorkspaceBrowser({
     if (renameBlocked) return
     setRenaming(true)
     setRenameError(null)
-    renameWorkspace(renameTarget.workspaceId, renameTrimmed).then(() => {
+    const rename = renameRepoKey === undefined
+      ? renameWorkspace(renameTarget.workspaceId, renameTrimmed)
+      : worktrees.setWorkspaceTitle(renameTarget.workspaceId as string, renameTrimmed)
+    rename.then(() => {
       setRenaming(false)
       setRenameTarget(null)
     }).catch((reason: unknown) => {

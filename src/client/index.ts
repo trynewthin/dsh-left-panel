@@ -3,8 +3,8 @@
  * sidebar shell's `sidebar.workspaces` hole (lower priority renders) with a
  * repository-aware browser: git repositories become fold nodes whose children
  * are their worktrees, each a real Host Workspace. The shipped ui-workspace
- * plugin stays loaded — its `uiWorkspace` service, `useWorkspaces` hook and
- * conversation-hero picker are reused, only the sidebar region is replaced.
+ * plugin stays loaded — its `uiWorkspace` service and `useWorkspaces` hook are
+ * reused, while the sidebar and conversation-hero picker are grouped by repository.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
@@ -16,9 +16,11 @@ import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
-import type { WorkspaceBrowserInjected } from './contract/slots.ts'
+import type { GroupedWorkspacePickerInjected, WorkspaceBrowserInjected } from './contract/slots.ts'
+import { GroupedWorkspacePicker } from './GroupedWorkspacePicker.tsx'
 import { en, NS, zh } from './locales.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { createWorkspaceViewStore } from './stores.ts'
@@ -93,6 +95,11 @@ export function apply(ctx: Context): void {
     worktrees: worktrees.actions,
     hooks: { hostInfo, worktrees: worktrees.source },
   })
+  const pickerInjected = (): GroupedWorkspacePickerInjected => ({
+    createWorkspace: input => workspaces.create(input),
+    pickDirectory: () => uiWorkspace.pickDirectory(),
+    hooks: { worktrees: worktrees.source },
+  })
 
   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register(
     {
@@ -103,5 +110,14 @@ export function apply(ctx: Context): void {
       locale: NS,
     },
     WorkspaceBrowser,
+  ))
+  ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register(
+    {
+      name: 'conversation.hero.workspace',
+      priority: SHADOW_PRIORITY,
+      inject: pickerInjected,
+      locale: NS,
+    },
+    GroupedWorkspacePicker,
   ))
 }

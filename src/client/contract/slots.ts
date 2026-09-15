@@ -79,7 +79,7 @@ export type WorkspaceBrowserInjected = {
   renameSession: (sessionId: SessionId, title: string) => Promise<void>
   /** Fork a Session at its last completed turn and open the child. */
   forkSession: (sessionId: SessionId) => void
-  /** Rename a Host Workspace (rejects on name conflict; resolves on durability). */
+  /** Rename a plain Host Workspace (global conflict policy; worktrees use the plugin action). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   /** Delete only a Host Workspace registration; directory and Session logs remain. */
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
@@ -114,4 +114,17 @@ export type WorkspaceBrowserProps =
   & PropsStore<ReturnType<typeof createWorkspaceViewStore>>
   & Omit<WorkspaceBrowserInjected, 'hooks'>
   & PropsHooks<WorkspaceBrowserInjected['hooks']>
+  & PropsLocale<'left-panel'>
+
+/** Plugin-aware share for the repository-grouped New Session Workspace picker. */
+export type GroupedWorkspacePickerInjected = {
+  hooks: { worktrees: HostObservable<WorktreeSnapshot> }
+  createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  pickDirectory: () => Promise<string | null>
+}
+
+export type GroupedWorkspacePickerProps =
+  PropsRuntime<'conversation.hero.workspace'>
+  & Omit<GroupedWorkspacePickerInjected, 'hooks'>
+  & PropsHooks<GroupedWorkspacePickerInjected['hooks']>
   & PropsLocale<'left-panel'>

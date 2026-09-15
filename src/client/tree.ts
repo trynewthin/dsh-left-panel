@@ -462,7 +462,7 @@ export interface RepoSection {
   expanded: boolean
   /** One of the worktree groups contains the selected session. */
   containsCurrent: boolean
-  /** Worktree Workspace groups, main worktree first, then by title. */
+  /** Worktree Workspace groups in durable Host order. */
   groups: readonly GroupNode[]
   /**
    * The repository's Workspace ids in durable Host order. The first one fixes
@@ -479,15 +479,6 @@ export interface GroupSection {
 }
 
 export type TreeSection = RepoSection | GroupSection
-
-/** Main worktree first, then by display title. */
-function compareWorktreeGroups(mainPath: string): (a: GroupNode, b: GroupNode) => number {
-  return (a, b) => {
-    if (a.cwd === mainPath) return -1
-    if (b.cwd === mainPath) return 1
-    return a.label.localeCompare(b.label)
-  }
-}
 
 /**
  * Fold worktree Workspace groups under their repository. A repository node
@@ -538,11 +529,10 @@ export function arrangeSections(
   }
   return sections.map((section) => {
     if (section.kind !== 'repo') return section
-    const ordered = [...section.groups].sort(compareWorktreeGroups(section.repo.mainPath))
     return {
       ...section,
-      groups: ordered,
-      containsCurrent: ordered.some(group => group.containsCurrent),
+      groups: section.groups,
+      containsCurrent: section.groups.some(group => group.containsCurrent),
       workspaceIds: section.groups.flatMap(group => (group.workspaceId === undefined ? [] : [group.workspaceId as string])),
     }
   })
@@ -552,6 +542,11 @@ export function arrangeSections(
 export interface WorkspaceMove {
   readonly ids: readonly string[]
   readonly anchor: string | undefined
+}
+
+/** Nested worktrees only accept drops from their own repository; top-level sections share the undefined scope. */
+export function workspaceDropAllowed(sourceRepoKey: string | undefined, targetRepoKey: string | undefined): boolean {
+  return sourceRepoKey === targetRepoKey
 }
 
 /**

@@ -24,10 +24,11 @@ export const ENDPOINT_PREFIX = 'left-panel'
  * - `list`: current snapshot without touching git.
  * - `sync`: reconcile now, then answer (the browser's Refresh action).
  * - `setRepoName`: set the repository's display name; an empty name restores the derived one.
+ * - `setWorkspaceTitle`: rename one worktree Workspace, with conflicts scoped to its repository.
  */
-export type Endpoint = 'list' | 'sync' | 'setRepoName'
+export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle'
 
-export const ENDPOINTS: readonly Endpoint[] = ['list', 'sync', 'setRepoName']
+export const ENDPOINTS: readonly Endpoint[] = ['list', 'sync', 'setRepoName', 'setWorkspaceTitle']
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */
 export function methodOf(endpoint: Endpoint): string {
@@ -81,3 +82,6 @@ export interface WorktreeSnapshot {
 
 /** Empty `name` restores the derived display name. */
 export interface SetRepoNameRequest { readonly repoKey: string; readonly name: string }
+
+/** Worktree Workspace title mutation; duplicate titles are rejected only within its repository. */
+export interface SetWorkspaceTitleRequest { readonly workspaceId: string; readonly title: string }

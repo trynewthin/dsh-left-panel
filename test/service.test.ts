@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ConnectionFetchRoute, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
@@ -319,11 +319,31 @@ test('worktree sync end to end against a real repository', async (t) => {
     await assert.rejects(harness.rpc('setRepoName', { repoKey }), /bad-request/)
   })
 
+  await t.test('scopes worktree title conflicts to one repository', async () => {
+    const feat = await registry.resolveByPath(featPath)
+    assert.ok(feat)
+    const outsidePath = join(root, 'outside')
+    await mkdir(outsidePath)
+    const outside = await registry.create(outsidePath, 'shared')
+    const renamed = await harness.rpc('setWorkspaceTitle', { workspaceId: feat.id, title: '  shared  ' })
+    assert.equal(registry.get(feat.id)?.title, 'shared', 'a title used outside the repository is allowed')
+    assert.equal(renamed.workspaceRepo[feat.id] !== undefined, true)
+    await assert.rejects(
+      harness.rpc('setWorkspaceTitle', { workspaceId: main.id, title: 'shared' }),
+      /name-conflict/,
+      'the same title inside one repository is rejected',
+    )
+    await assert.rejects(harness.rpc('setWorkspaceTitle', { workspaceId: outside.id, title: 'x' }), /not-worktree/)
+    await assert.rejects(harness.rpc('setWorkspaceTitle', { workspaceId: feat.id, title: '  ' }), /bad-request/)
+    await feat.setTitle('My branch')
+    await registry.delete(outside.id)
+  })
+
   await t.test('exposes exactly the endpoints the browser half uses', async () => {
     // The plugin has no per-repository switches and no manual registration:
     // reconciliation is continuous and the browser only reads or refreshes.
     assert.deepEqual(harness.routePaths().sort(), [
-      '/api/left-panel/list', '/api/left-panel/setRepoName', '/api/left-panel/sync',
+      '/api/left-panel/list', '/api/left-panel/setRepoName', '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
     ])
     assert.equal(harness.service.snapshot().repos.length, 1)
   })

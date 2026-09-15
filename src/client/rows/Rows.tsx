@@ -111,7 +111,7 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.onCreate - start a frontend Session inside this Workspace.
  * @param props.drag - optional workspace-row drag wiring.
  * @param props.home - host account home for POSIX hover-path abbreviation.
- * @param props.nested - the row sits under a repository node (indented, not draggable).
+ * @param props.nested - the row sits under a repository node and can only be reordered within it.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */

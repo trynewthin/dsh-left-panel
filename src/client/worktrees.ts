@@ -17,6 +17,8 @@ export interface WorktreeActions {
   refresh(): Promise<void>
   /** Set a repository's display name; an empty name restores the derived one. */
   setRepoName(repoKey: string, name: string): Promise<void>
+  /** Rename a worktree Workspace; title conflicts are scoped to its repository. */
+  setWorkspaceTitle(workspaceId: string, title: string): Promise<void>
 }
 
 export interface WorktreeClient {
@@ -64,6 +66,7 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
     actions: {
       refresh: () => call('sync'),
       setRepoName: (repoKey, name) => call('setRepoName', { repoKey, name }),
+      setWorkspaceTitle: (workspaceId, title) => call('setWorkspaceTitle', { workspaceId, title }),
     },
     start() {
       refresh()

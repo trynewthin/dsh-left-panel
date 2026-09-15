@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { arrangeSections, planWorkspaceMove, repoGroupKey, type GroupNode } from '../src/client/tree.ts'
+import {
+  arrangeSections, planWorkspaceMove, repoGroupKey, workspaceDropAllowed, type GroupNode,
+} from '../src/client/tree.ts'
 import type { RepoInfo, WorktreeInfo, WorktreeSnapshot } from '../src/protocol.ts'
 
 function group(workspaceId: string, label: string, cwd: string, containsCurrent = false): GroupNode {
@@ -44,7 +46,7 @@ function snapshot(repos: RepoInfo[]): WorktreeSnapshot {
   return { repos, workspaceRepo, syncedAt: 1 }
 }
 
-test('folds worktree groups under their repository and sorts them main-first', () => {
+test('folds worktree groups under their repository in durable Host order', () => {
   const wsA = 'ws-a', wsB = 'ws-b'
   const sections = arrangeSections(
     [group(wsA, 'feat/login', '/wt/login'), group('ws-plain', 'plain', '/plain'), group(wsB, 'fix/sidebar', '/wt/sidebar')],
@@ -132,6 +134,7 @@ test('repository sections expose their workspace ids in durable order', () => {
   )
   const section = sections[0]
   assert.ok(section?.kind === 'repo')
+  assert.deepEqual(section.groups.map(group => group.label), ['feat/a', 'main'])
   assert.deepEqual(section.workspaceIds, ['ws-wt', 'ws-main'], 'durable order, not display order')
 })
 
@@ -142,6 +145,14 @@ test('planWorkspaceMove reorders a single workspace against the durable order', 
   assert.equal(planWorkspaceMove(order, ['a'], { ids: ['a'], half: 'before' }), undefined, 'dropping on itself')
   assert.equal(planWorkspaceMove(order, ['a'], { ids: ['b'], half: 'before' }), undefined, 'already there')
   assert.deepEqual(planWorkspaceMove(order, ['a'], { ids: ['c'], half: 'after' }), { ids: ['a'], anchor: undefined }, 'to the end')
+})
+
+test('workspace drops stay within the same hierarchy level and repository', () => {
+  assert.equal(workspaceDropAllowed(undefined, undefined), true, 'top-level sections')
+  assert.equal(workspaceDropAllowed('repo-a', 'repo-a'), true, 'same repository')
+  assert.equal(workspaceDropAllowed('repo-a', 'repo-b'), false, 'different repositories')
+  assert.equal(workspaceDropAllowed('repo-a', undefined), false, 'worktree onto top level')
+  assert.equal(workspaceDropAllowed(undefined, 'repo-a'), false, 'top level onto worktree')
 })
 
 test('planWorkspaceMove moves a repository block as one unit, keeping its order', () => {
