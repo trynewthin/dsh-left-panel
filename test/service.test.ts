@@ -14,6 +14,7 @@ import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 
 import { runGit } from '../src/git.ts'
 import { WorktreeSyncService } from '../src/service.ts'
+import { loadState } from '../src/state.ts'
 import type { WorktreeSnapshot } from '../src/protocol.ts'
 
 const GIT_IDENTITY = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', '-c', 'commit.gpgsign=false']
@@ -302,6 +303,18 @@ test('worktree sync end to end against a real repository', async (t) => {
     snapshot = await harness.rpc('register', { path: featPath })
     assert.ok(await registry.resolveByPath(featPath))
     assert.equal(snapshot.repos[0]?.worktrees.find(w => w.path === featPath)?.ignored, false)
+  })
+
+  await t.test('putting the directory back lifts the ignore and the plugin manages it again', async () => {
+    // The user's route back is the ordinary "add workspace" gesture.
+    const restored = await registry.create(featPath, 'repo-login')
+    await harness.service.syncNow()
+    const persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(await realpath(featPath)), false, 'tombstone cleared')
+    const worktree = harness.service.snapshot().repos[0]?.worktrees.find(w => w.path === featPath)
+    assert.ok(worktree)
+    assert.equal(worktree.workspaceId, restored.id)
+    assert.equal(worktree.ignored, false)
   })
 
   await t.test('automation off lists new worktrees without registering them', async () => {

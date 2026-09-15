@@ -107,6 +107,12 @@ export class WorktreeSyncService {
   private running: Promise<void> | undefined
   private readonly watchers = new Map<string, FSWatcher[]>()
   private readonly selfDeletes = new Set<string>()
+  /**
+   * Tombstones that apply immediately, before their durable write lands: a
+   * deletion the user just performed must not render as "not registered" for
+   * the moment between the registry change and the state-file write.
+   */
+  private readonly ignoring = new Set<string>()
   private debounceTimer: NodeJS.Timeout | undefined
   private graceTimer: NodeJS.Timeout | undefined
   private pollTimer: NodeJS.Timeout | undefined
@@ -166,7 +172,7 @@ export class WorktreeSyncService {
   snapshot(): WorktreeSnapshot {
     const state = this.store.current
     const byPath = new Map(this.registry.map(workspace => [workspace.path, workspace]))
-    const ignored = new Set(state.ignored)
+    const ignored = this.ignoredPaths()
     const workspaceRepo: Record<string, string> = {}
     const repos: RepoInfo[] = this.repos.map((repo) => {
       const worktrees: WorktreeInfo[] = []
@@ -186,7 +192,9 @@ export class WorktreeSyncService {
           exists: worktree.exists,
           title: worktreeTitle(worktree),
           workspaceId,
-          ignored: ignored.has(worktree.path),
+          // A registered worktree is never "ignored": the user putting the
+          // directory back is what lifts the tombstone.
+          ignored: workspaceId === null && ignored.has(worktree.path),
         })
       }
       return {
@@ -246,11 +254,16 @@ export class WorktreeSyncService {
     return this.running
   }
 
+  /** The union of durable tombstones and the ones applied this instant. */
+  private ignoredPaths(): Set<string> {
+    return new Set([...this.store.current.ignored, ...this.ignoring])
+  }
+
   private async reconcileOnce(): Promise<void> {
     await this.scan()
     const state = this.store.current
     const memory: SyncMemory = {
-      ignored: new Set(state.ignored),
+      ignored: this.ignoredPaths(),
       repoAuto: new Map(Object.entries(state.repoAuto)),
       knownWorktrees: new Map(Object.entries(state.knownWorktrees)),
       autoTitles: new Map(Object.entries(state.autoTitles)),
@@ -353,10 +366,13 @@ export class WorktreeSyncService {
         }
       }
     }
+    const registeredPaths = new Set(this.registry.map(workspace => workspace.path))
+    // Putting the directory back is how a user lifts an ignore.
+    for (const path of [...this.ignoring]) if (registeredPaths.has(path)) this.ignoring.delete(path)
     for (const path of Object.keys(titles)) if (!known.has(path)) delete titles[path]
     const next: PersistedState = {
       ...state,
-      ignored: state.ignored.filter(path => !released.has(path)),
+      ignored: state.ignored.filter(path => !released.has(path) && !registeredPaths.has(path)),
       knownWorktrees: Object.fromEntries(known),
       autoTitles: titles,
     }
@@ -436,6 +452,7 @@ export class WorktreeSyncService {
         const entry = this.registry.find(workspace => workspace.id === change.key)
         if (entry !== undefined && this.isWorktreePath(entry.path)) {
           this.ctx.logger.info(`left-panel: ${entry.path} removed by the user; not registering it again`)
+          this.ignoring.add(entry.path)
           void this.store.update(state => state.ignored.includes(entry.path)
             ? state
             : { ...state, ignored: [...state.ignored, entry.path] })
@@ -476,6 +493,7 @@ export class WorktreeSyncService {
           if (found === undefined) return fail('left-panel/unknown-worktree', `${raw} is not a worktree of a registered repository`, { path: raw })
           const { worktree } = found
           if (endpoint === 'ignore') {
+            this.ignoring.add(worktree.path)
             await this.store.update(state => state.ignored.includes(worktree.path)
               ? state
               : { ...state, ignored: [...state.ignored, worktree.path] })
@@ -485,6 +503,7 @@ export class WorktreeSyncService {
               await this.ctx.workspaceRegistry.delete(registered.id as WorkspaceId)
             }
           } else {
+            this.ignoring.delete(worktree.path)
             await this.store.update(state => state.ignored.includes(worktree.path)
               ? { ...state, ignored: state.ignored.filter(path => path !== worktree.path) }
               : state)

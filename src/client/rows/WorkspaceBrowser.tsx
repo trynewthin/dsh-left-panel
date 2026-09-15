@@ -469,7 +469,7 @@ function SessionTree({
    * One Workspace group: header row + expanded top-level session rows. Nested
    * worktree groups are not draggable — their position follows the repository.
    */
-  const renderGroup = (group: GroupNode, nested: boolean, badge?: string) => {
+  const renderGroup = (group: GroupNode, nested: boolean) => {
     const workspaceId = group.workspaceId
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
@@ -534,7 +534,6 @@ function SessionTree({
           home={home}
           t={t}
           nested={nested}
-          badge={badge}
           onToggle={() => {
             if (group.expanded) {
               setExpandedSessionGroups(keys => keys.filter(key => key !== group.key))
@@ -649,9 +648,7 @@ function SessionTree({
                   worktrees.setRepoAuto(section.repo.key, auto).catch(warnRejected('repository auto sync'))
                 }}
               />
-              {section.expanded && section.groups.map(group => renderGroup(
-                group, true, group.cwd === section.repo.mainPath ? t('worktree.main') : undefined,
-              ))}
+              {section.expanded && section.groups.map(group => renderGroup(group, true))}
               {section.expanded && section.ghosts.length > 0 && (
                 <div className={css.nestedSection}>
                   {section.ghosts.map(ghost => (
@@ -661,7 +658,6 @@ function SessionTree({
                       busy={ghostBusy === ghost.path}
                       t={t}
                       onRegister={() => { runWorktreeAction(ghost.path, () => worktrees.register(ghost.path)) }}
-                      onUnignore={() => { runWorktreeAction(ghost.path, () => worktrees.unignore(ghost.path)) }}
                     />
                   ))}
                 </div>

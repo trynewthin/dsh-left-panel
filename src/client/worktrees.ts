@@ -15,10 +15,6 @@ export const EMPTY_SNAPSHOT: WorktreeSnapshot = { repos: [], workspaceRepo: {}, 
 export interface WorktreeActions {
   /** Reconcile now. */
   sync(): Promise<void>
-  /** Unregister a worktree's Workspace and keep it unregistered. */
-  ignore(path: string): Promise<void>
-  /** Allow automatic registration again. */
-  unignore(path: string): Promise<void>
   /** Register one worktree now. */
   register(path: string): Promise<void>
   /** Switch automatic registration for a repository. */
@@ -70,8 +66,6 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
     },
     actions: {
       sync: () => call('sync'),
-      ignore: path => call('ignore', { path }),
-      unignore: path => call('unignore', { path }),
       register: path => call('register', { path }),
       setRepoAuto: (repoKey, auto) => call('setRepoAuto', { repoKey, auto }),
     },

@@ -494,9 +494,12 @@ function compareGhosts(a: WorktreeInfo, b: WorktreeInfo): number {
  * Fold worktree Workspace groups under their repository. A repository node
  * sits where its first Workspace sits in Host order; Workspaces outside any
  * scanned repository keep their own row. Repository nodes default to expanded.
- * Worktrees the host reports as registered but that carry no derived group
- * (their sessions have not streamed in yet, or they have none) still render as
- * group rows so the repository never loses a child.
+ *
+ * Only what the Host actually holds is rendered: a row exists for a registered
+ * Workspace (its group) or for a worktree the user can still register (a ghost
+ * in a repository whose automation is off). A worktree the user removed, one
+ * whose directory is gone, and one git no longer lists produce no row at all —
+ * re-registering the directory is what brings it back.
  * @param groups - derived groups in Host order.
  * @param snapshot - repositories and worktrees as the host last observed them.
  * @param groupExpansion - viewing-store expansion state (repository keys included).
@@ -510,22 +513,22 @@ export function arrangeSections(
   const repoByKey = new Map(snapshot.repos.map(repo => [repo.key, repo]))
   const sections: TreeSection[] = []
   const buckets = new Map<string, GroupNode[]>()
-  const groupByWorkspaceId = new Map(groups.map(group => [group.workspaceId as string, group]))
-  const emitRepo = (repo: RepoInfo): { bucket: GroupNode[]; section: RepoSection } => {
+  const emitRepo = (repo: RepoInfo): GroupNode[] => {
     const key = repoGroupKey(repo.key)
     const bucket: GroupNode[] = []
-    const section: RepoSection = {
+    sections.push({
       kind: 'repo',
       key,
       repo,
       expanded: groupExpansion[key] ?? true,
       containsCurrent: false,
       groups: bucket,
-      ghosts: [...repo.worktrees].filter(worktree => worktree.workspaceId === null).sort(compareGhosts),
-    }
-    sections.push(section)
+      ghosts: [...repo.worktrees]
+        .filter(worktree => worktree.workspaceId === null && !worktree.ignored && worktree.exists && !worktree.prunable)
+        .sort(compareGhosts),
+    })
     buckets.set(repo.key, bucket)
-    return { bucket, section }
+    return bucket
   }
   for (const group of groups) {
     const repoKey = group.workspaceId === undefined ? undefined : snapshot.workspaceRepo[group.workspaceId]
@@ -534,30 +537,8 @@ export function arrangeSections(
       sections.push({ kind: 'group', group })
       continue
     }
-    let bucket = buckets.get(repo.key)
-    if (bucket === undefined) {
-      bucket = emitRepo(repo).bucket
-    }
+    const bucket = buckets.get(repo.key) ?? emitRepo(repo)
     bucket.push(group)
-  }
-  // Registered worktrees without a derived group (the session list has not
-  // streamed in yet, or the worktree simply has no sessions) keep their row.
-  for (const repo of snapshot.repos) {
-    const bucket = buckets.get(repo.key) ?? emitRepo(repo).bucket
-    for (const worktree of repo.worktrees) {
-      if (worktree.workspaceId === null || groupByWorkspaceId.has(worktree.workspaceId)) continue
-      bucket.push({
-        key: worktree.workspaceId,
-        workspaceId: worktree.workspaceId as GroupNode['workspaceId'],
-        cwd: worktree.path,
-        createdAt: undefined,
-        label: worktree.title,
-        sessionCount: 0,
-        expanded: false,
-        containsCurrent: false,
-        sessions: [],
-      })
-    }
   }
   return sections.map((section) => {
     if (section.kind !== 'repo') return section

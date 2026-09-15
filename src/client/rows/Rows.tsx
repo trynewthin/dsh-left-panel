@@ -113,11 +113,10 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.drag - optional workspace-row drag wiring.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.nested - the row sits under a repository node (indented, not draggable).
- * @param props.badge - short marker after the title (the repository's main worktree).
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, nested = false, badge, t }: {
+export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, nested = false, t }: {
   group: GroupNode
   onToggle: () => void
   onCreate: () => void
@@ -129,8 +128,6 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   home?: string | undefined
   /** The row is a worktree under a repository node. */
   nested?: boolean | undefined
-  /** Short marker rendered after the title. */
-  badge?: string | undefined
   t: RowTranslate
 }) {
   const row = group
@@ -170,7 +167,6 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
       </span>
-      {badge !== undefined && <span className={css.badge}>{badge}</span>}
       <span className={css.rowActions}>
         {actions !== undefined && (
           <Menu
@@ -230,17 +226,13 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   )
 }
 
-/** Hover-card body for a repository node: name, main worktree path, count, automation state, scan error. */
+/** Hover-card body for a repository node: name, main worktree path, automation state, scan error. */
 function RepoHoverContent({ section, home, t }: { section: RepoSection; home: string | undefined; t: RowTranslate }) {
   const { repo } = section
-  const count = repo.worktrees.length
   return (
     <div className={css.hoverContent}>
       <div className={css.hoverTitle}>{repo.name}</div>
       <div className={css.hoverPath}>{abbreviateHomePath(repo.mainPath, home)}</div>
-      <div className={css.hoverTime}>
-        {t(count === 1 ? 'repo.worktrees.count.one' : 'repo.worktrees.count.other', { n: count })}
-      </div>
       <div className={css.hoverTime}>{t(repo.auto ? 'repo.hover.auto.on' : 'repo.hover.auto.off')}</div>
       {repo.error !== undefined && (
         <div className={css.hoverStatus}>
@@ -277,10 +269,9 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
   const { repo } = section
   const [menuOpen, setMenuOpen] = useState(false)
   const active = section.expanded && section.containsCurrent
-  const count = repo.worktrees.length
-  const meta = syncing
-    ? t('repo.syncing')
-    : t(count === 1 ? 'repo.worktrees.count.one' : 'repo.worktrees.count.other', { n: count })
+  // The tree itself shows how many worktrees there are; this cell speaks only
+  // when something needs attention (a scan failure or a reconcile in flight).
+  const meta = repo.error !== undefined ? '!' : syncing ? t('repo.syncing') : undefined
   const menuItems = [
     { id: 'sync', label: t('repo.menu.sync') },
     { id: 'auto', label: t(repo.auto ? 'repo.menu.autoOff' : 'repo.menu.autoOn') },
@@ -301,9 +292,9 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
       <span className={css.projectText}>
         <span className={css.title}>{repo.name}</span>
       </span>
-      <span className={clsx(css.repoMeta, repo.error !== undefined && css.repoMetaError)}>
-        {repo.error !== undefined ? '!' : meta}
-      </span>
+      {meta !== undefined && (
+        <span className={clsx(css.repoMeta, repo.error !== undefined && css.repoMetaError)}>{meta}</span>
+      )}
       <span className={css.rowActions}>
         <Menu
           open={menuOpen}
@@ -343,29 +334,21 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
 }
 
 /**
- * A worktree git reports that has no Workspace: ignored by the user, not yet
- * registered (automation off), or missing on disk. The row cannot open a
- * session; its one action registers the worktree or lifts the ignore.
+ * A worktree git reports that has no Workspace while its repository's
+ * automation is off: the row exists only to register it by hand. Worktrees the
+ * user removed, or whose directory is gone, render no row at all.
  * @param props.worktree - host worktree facts.
- * @param props.busy - an action on this row is in flight.
+ * @param props.busy - a registration is in flight.
  * @param props.onRegister - register the worktree as a Workspace now.
- * @param props.onUnignore - allow automatic registration again.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function GhostWorktreeItem({ worktree, busy, onRegister, onUnignore, t }: {
+export function GhostWorktreeItem({ worktree, busy, onRegister, t }: {
   worktree: WorktreeInfo
   busy: boolean
   onRegister: () => void
-  onUnignore: () => void
   t: RowTranslate
 }) {
-  const state = !worktree.exists
-    ? t('worktree.missing')
-    : worktree.ignored ? t('worktree.ignored') : t('worktree.unregistered')
-  const action = worktree.ignored
-    ? { label: t('worktree.unignore'), run: onUnignore }
-    : { label: t('worktree.register'), run: onRegister }
   const detail = worktree.detached
     ? t('worktree.hover.detached', { head: worktree.head.slice(0, 7) })
     : t('worktree.hover.branch', { branch: worktree.branch ?? worktree.title })
@@ -377,22 +360,19 @@ export function GhostWorktreeItem({ worktree, busy, onRegister, onUnignore, t }:
       <span className={css.projectText}>
         <span className={css.title}>{worktree.title}</span>
       </span>
-      {worktree.main && <span className={css.badge}>{t('worktree.main')}</span>}
-      <span className={css.ghostState}>{state}</span>
-      {worktree.exists && (
-        <span className={css.rowActions}>
-          <button
-            type="button"
-            className={css.iconButton}
-            aria-label={action.label}
-            title={action.label}
-            disabled={busy}
-            onClick={(e) => { e.stopPropagation(); action.run() }}
-          >
-            <IconPlusOutline16 />
-          </button>
-        </span>
-      )}
+      <span className={css.ghostState}>{t('worktree.unregistered')}</span>
+      <span className={css.rowActions}>
+        <button
+          type="button"
+          className={css.iconButton}
+          aria-label={t('worktree.register')}
+          title={t('worktree.register')}
+          disabled={busy}
+          onClick={(e) => { e.stopPropagation(); onRegister() }}
+        >
+          <IconPlusOutline16 />
+        </button>
+      </span>
     </div>
   )
   return (
@@ -403,7 +383,6 @@ export function GhostWorktreeItem({ worktree, busy, onRegister, onUnignore, t }:
           <div className={css.hoverTitle}>{worktree.title}</div>
           <div className={css.hoverPath}>{worktree.path}</div>
           <div className={css.hoverTime}>{detail}</div>
-          <div className={css.hoverTime}>{state}</div>
         </div>
       )}
       copyText={worktree.path}

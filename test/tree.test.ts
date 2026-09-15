@@ -18,10 +18,10 @@ function group(workspaceId: string, label: string, cwd: string, containsCurrent 
   }
 }
 
-function worktree(path: string, title: string, workspaceId: string | null, main = false, ignored = false): WorktreeInfo {
+function worktree(path: string, title: string, workspaceId: string | null, main = false, ignored = false, exists = true): WorktreeInfo {
   return {
     path, head: 'a'.repeat(40), branch: title, detached: false, main, bare: false,
-    locked: false, prunable: false, exists: true, title, workspaceId, ignored,
+    locked: false, prunable: false, exists, title, workspaceId, ignored,
   }
 }
 
@@ -45,7 +45,7 @@ function snapshot(repos: RepoInfo[]): WorktreeSnapshot {
   return { repos, workspaceRepo, syncedAt: 1, syncing: false }
 }
 
-test('folds worktree groups under their repository in host order and sorts them main-first', () => {
+test('folds worktree groups under their repository and sorts them main-first', () => {
   const wsA = 'ws-a', wsB = 'ws-b'
   const sections = arrangeSections(
     [group(wsA, 'feat/login', '/wt/login'), group('ws-plain', 'plain', '/plain'), group(wsB, 'fix/sidebar', '/wt/sidebar')],
@@ -60,11 +60,30 @@ test('folds worktree groups under their repository in host order and sorts them 
   const first = sections[0]
   assert.ok(first?.kind === 'repo')
   assert.equal(first.repo.key, '/repo/.git')
-  assert.deepEqual(first.groups.map(g => g.label), ['main', 'feat/login', 'fix/sidebar'])
+  assert.deepEqual(first.groups.map(g => g.label), ['feat/login', 'fix/sidebar'])
   assert.equal(first.ghosts.length, 0)
   const second = sections[1]
   assert.ok(second?.kind === 'group')
   assert.equal(second.group.label, 'plain')
+})
+
+test('a repository shows only registered groups: no row is invented from the snapshot', () => {
+  // /repo is registered (ws-main) but its group is absent — for example the
+  // Workspace was just deleted and the Workspaces stream has not caught up.
+  // The row must vanish rather than be re-synthesized from the worktree list.
+  const sections = arrangeSections(
+    [group('ws-a', 'feat/a', '/wt/a')],
+    snapshot([repo('/repo/.git', [
+      worktree('/repo', 'main', 'ws-main', true),
+      worktree('/wt/a', 'feat/a', 'ws-a'),
+    ])]),
+    {},
+  )
+  assert.equal(sections.length, 1)
+  const section = sections[0]
+  assert.ok(section?.kind === 'repo')
+  assert.deepEqual(section.groups.map(g => g.label), ['feat/a'])
+  assert.equal(section.ghosts.length, 0, 'a registered worktree is never a ghost')
 })
 
 test('repo node placement follows its first workspace, not its own order', () => {
@@ -81,22 +100,30 @@ test('repo node placement follows its first workspace, not its own order', () =>
   assert.equal(sections[1]?.kind, 'repo')
 })
 
-test('ghost worktrees collect unregistered entries; a collapsed repo hides its children', () => {
+test('ghosts cover only worktrees the user can still register; ignored and vanished ones are hidden', () => {
   const snap = snapshot([repo('/repo/.git', [
     worktree('/repo', 'main', 'ws-main', true),
-    worktree('/wt/gone', 'gone', null),
+    worktree('/wt/registerable', 'registerable', null),
     worktree('/wt/ignored', 'ignored', null, false, true),
+    worktree('/wt/missing', 'missing', null, false, false, false),
   ])])
   const sections = arrangeSections([group('ws-main', 'main', '/repo')], snap, {})
   const repoSection = sections[0]
   assert.ok(repoSection?.kind === 'repo')
-  assert.deepEqual(repoSection.ghosts.map(g => g.title), ['gone', 'ignored'])
+  assert.deepEqual(repoSection.ghosts.map(g => g.title), ['registerable'])
   assert.equal(repoSection.expanded, true)
 
   const collapsed = arrangeSections([group('ws-main', 'main', '/repo')], snap, { [repoGroupKey('/repo/.git')]: false })
   const hidden = collapsed[0]
   assert.ok(hidden?.kind === 'repo')
   assert.equal(hidden.expanded, false)
+})
+
+test('a repository whose every worktree is gone renders no section at all', () => {
+  const sections = arrangeSections([], snapshot([repo('/repo/.git', [
+    worktree('/repo', 'main', 'ws-main', true),
+  ])]), {})
+  assert.deepEqual(sections, [])
 })
 
 test('containsCurrent rolls up from the worktree groups', () => {
