@@ -230,7 +230,8 @@ interface DragState {
 interface WorkspaceDragState {
   /** Workspace ids the drag carries, in durable order. */
   ids: readonly string[]
-  over: { id: string; half: 'before' | 'after' } | null
+  /** Entire target section, so dropping after a repository clears all of its worktrees. */
+  over: { ids: readonly string[]; half: 'before' | 'after' } | null
 }
 
 /** Resolve an insertion side from the full rendered workspace group. */
@@ -470,7 +471,7 @@ function SessionTree({
     const workspaceId = group.workspaceId
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
-    const workspaceMarker = !nested && workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
+    const workspaceMarker = !nested && workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
       ? workspaceDrag.over.half
       : null
     const workspaceDragProps = workspaceId === undefined || nested ? undefined : {
@@ -492,13 +493,13 @@ function SessionTree({
       : (half: 'before' | 'after') => {
         setWorkspaceDrag(active => active === null
           ? active
-          : { ...active, over: { id: workspaceId, half } })
+          : { ...active, over: { ids: [workspaceId], half } })
       }
     const dropWorkspace = workspaceId === undefined || nested
       ? undefined
       : (half: 'before' | 'after') => {
         if (workspaceDrag === null) return
-        commitWorkspaceDrag(workspaceDrag, { id: workspaceId, half })
+        commitWorkspaceDrag(workspaceDrag, { ids: [workspaceId], half })
       }
     return (
     // Group section: header row + expanded top-level session rows. The
@@ -621,7 +622,7 @@ function SessionTree({
     return first.kind === 'group' ? (first.group.workspaceId as string | undefined) : first.workspaceIds[0]
   })()
   const workspaceDropAtListStart = firstRowId !== undefined
-    && workspaceDrag?.over?.id === firstRowId
+    && workspaceDrag?.over?.ids[0] === firstRowId
     && workspaceDrag.over.half === 'before'
 
   return (
@@ -640,7 +641,7 @@ function SessionTree({
           // The node is reordered by moving its Workspaces as one block, so the
           // durable Host order still reads sensibly outside this plugin.
           const anchorId = section.workspaceIds[0]
-          const sectionMarker = anchorId !== undefined && workspaceDrag?.over?.id === anchorId
+          const sectionMarker = anchorId !== undefined && workspaceDrag?.over?.ids.includes(anchorId)
             ? workspaceDrag.over.half
             : null
           const nodeDrag = anchorId === undefined ? undefined : {
@@ -670,13 +671,16 @@ function SessionTree({
                 : (e) => {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'move'
-                  setWorkspaceDrag(active => (active === null ? active : { ...active, over: { id: anchorId, half: workspaceGroupHalf(e) } }))
+                  setWorkspaceDrag(active => (active === null ? active : {
+                    ...active,
+                    over: { ids: section.workspaceIds, half: workspaceGroupHalf(e) },
+                  }))
                 }}
               onDrop={workspaceDrag === null || anchorId === undefined
                 ? undefined
                 : (e) => {
                   e.preventDefault()
-                  commitWorkspaceDrag(workspaceDrag, { id: anchorId, half: workspaceGroupHalf(e) })
+                  commitWorkspaceDrag(workspaceDrag, { ids: section.workspaceIds, half: workspaceGroupHalf(e) })
                 }}
             >
               <RepoRowItem

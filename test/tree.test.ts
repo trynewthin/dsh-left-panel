@@ -137,21 +137,33 @@ test('repository sections expose their workspace ids in durable order', () => {
 
 test('planWorkspaceMove reorders a single workspace against the durable order', () => {
   const order = ['a', 'b', 'c']
-  assert.deepEqual(planWorkspaceMove(order, ['c'], { id: 'a', half: 'before' }), { ids: ['c'], anchor: 'a' })
-  assert.deepEqual(planWorkspaceMove(order, ['a'], { id: 'b', half: 'after' }), { ids: ['a'], anchor: 'c' })
-  assert.equal(planWorkspaceMove(order, ['a'], { id: 'a', half: 'before' }), undefined, 'dropping on itself')
-  assert.equal(planWorkspaceMove(order, ['a'], { id: 'b', half: 'before' }), undefined, 'already there')
-  assert.deepEqual(planWorkspaceMove(order, ['a'], { id: 'c', half: 'after' }), { ids: ['a'], anchor: undefined }, 'to the end')
+  assert.deepEqual(planWorkspaceMove(order, ['c'], { ids: ['a'], half: 'before' }), { ids: ['c'], anchor: 'a' })
+  assert.deepEqual(planWorkspaceMove(order, ['a'], { ids: ['b'], half: 'after' }), { ids: ['a'], anchor: 'c' })
+  assert.equal(planWorkspaceMove(order, ['a'], { ids: ['a'], half: 'before' }), undefined, 'dropping on itself')
+  assert.equal(planWorkspaceMove(order, ['a'], { ids: ['b'], half: 'before' }), undefined, 'already there')
+  assert.deepEqual(planWorkspaceMove(order, ['a'], { ids: ['c'], half: 'after' }), { ids: ['a'], anchor: undefined }, 'to the end')
 })
 
 test('planWorkspaceMove moves a repository block as one unit, keeping its order', () => {
   const order = ['a1', 'a2', 'b1', 'c1']
   // block a (a1,a2) dropped after the b row: it lands before c1 and keeps a1,a2 order.
-  assert.deepEqual(planWorkspaceMove(order, ['a1', 'a2'], { id: 'b1', half: 'after' }), { ids: ['a1', 'a2'], anchor: 'c1' })
+  assert.deepEqual(planWorkspaceMove(order, ['a1', 'a2'], { ids: ['b1'], half: 'after' }), { ids: ['a1', 'a2'], anchor: 'c1' })
   // block c dropped before a: anchor is a's first workspace.
-  assert.deepEqual(planWorkspaceMove(order, ['c1'], { id: 'a1', half: 'before' }), { ids: ['c1'], anchor: 'a1' })
+  assert.deepEqual(planWorkspaceMove(order, ['c1'], { ids: ['a1', 'a2'], half: 'before' }), { ids: ['c1'], anchor: 'a1' })
   // a block dropped onto one of its own rows never reorders.
-  assert.equal(planWorkspaceMove(order, ['a1', 'a2'], { id: 'a2', half: 'before' }), undefined)
+  assert.equal(planWorkspaceMove(order, ['a1', 'a2'], { ids: ['a1', 'a2'], half: 'before' }), undefined)
   // a block already in front of its target is a no-op.
-  assert.equal(planWorkspaceMove(order, ['a1', 'a2'], { id: 'b1', half: 'before' }), undefined)
+  assert.equal(planWorkspaceMove(order, ['a1', 'a2'], { ids: ['b1'], half: 'before' }), undefined)
+})
+
+test('dropping after a repository targets the end of all its worktrees', () => {
+  const order = ['a1', 'a2', 'b1', 'b2', 'b3', 'c1']
+  assert.deepEqual(
+    planWorkspaceMove(order, ['a1', 'a2'], { ids: ['b1', 'b2', 'b3'], half: 'after' }),
+    { ids: ['a1', 'a2'], anchor: 'c1' },
+  )
+  assert.deepEqual(
+    planWorkspaceMove(order, ['c1'], { ids: ['a1', 'a2'], half: 'after' }),
+    { ids: ['c1'], anchor: 'b1' },
+  )
 })

@@ -1,5 +1,9 @@
 node_modules/
-lib/
 dev.patch.yml
 .DS_Store
+
+# Build output is committed so a git-based install (and any tree-level plugin
+# validation) finds the entry and the browser bundle without running a build;
+# source maps stay out of git and ship only in the npm tarball.
+lib/*.map
 *.tgz

@@ -564,26 +564,26 @@ export interface WorkspaceMove {
  * order resolves to undefined.
  * @param order - durable Workspace ids, in Host order.
  * @param moving - Workspaces the drag carries.
- * @param target - the row dropped on and which half of it.
+ * @param target - every Workspace in the target section and which half of that section received the drop.
  * @returns the resolved move, or undefined when the order cannot change.
  */
 export function planWorkspaceMove(
   order: readonly string[],
   moving: readonly string[],
-  target: { readonly id: string; readonly half: 'before' | 'after' },
+  target: { readonly ids: readonly string[]; readonly half: 'before' | 'after' },
 ): WorkspaceMove | undefined {
   const block = order.filter(id => moving.includes(id))
   if (block.length === 0) return undefined
   const blockSet = new Set(block)
-  // A drop onto the moving block itself never reorders anything.
-  if (blockSet.has(target.id)) return undefined
-  const targetIndex = order.indexOf(target.id)
-  if (targetIndex === -1) return undefined
-  let anchorIndex = targetIndex
-  if (target.half === 'after') {
-    anchorIndex += 1
-    while (anchorIndex < order.length && blockSet.has(order[anchorIndex] as string)) anchorIndex += 1
-  }
+  const targetBlock = order.filter(id => target.ids.includes(id))
+  if (targetBlock.length === 0) return undefined
+  // A drop onto the moving section itself never reorders anything.
+  if (targetBlock.some(id => blockSet.has(id))) return undefined
+  const boundaryId = target.half === 'before' ? targetBlock[0] : targetBlock[targetBlock.length - 1]
+  if (boundaryId === undefined) return undefined
+  let anchorIndex = order.indexOf(boundaryId)
+  if (target.half === 'after') anchorIndex += 1
+  while (anchorIndex < order.length && blockSet.has(order[anchorIndex] as string)) anchorIndex += 1
   const anchor = anchorIndex >= order.length ? undefined : order[anchorIndex]
   const without = order.filter(id => !blockSet.has(id))
   const insertAt = anchor === undefined ? without.length : without.indexOf(anchor)
