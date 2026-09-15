@@ -2,6 +2,8 @@
 
 DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强：把左侧边栏的工作区列表重组为**项目（git 仓库，仅分组）→ worktree（真实工作区，可开会话）**的两层结构，并自动跟随 `git worktree` 的增删注册/注销工作区。
 
+![dsh-left-panel 界面演示](https://raw.githubusercontent.com/trynewthin/dsh-left-panel/main/docs/ui-demo.png)
+
 - **底层语义不变**：每个 worktree 就是一个真实的 DSH Workspace（会话 cwd = worktree 目录），会话、日志、归档行为与原生完全一致；本插件只做注册/注销与展示分组。
 - **自动同步是唯一行为**：向某个 git 仓库的任意工作树添加工作区后，插件扫描 `git worktree list`，把该仓库其余 worktree 自动注册为工作区（以分支名命名，detached 用短 hash）；worktree 被移除后自动注销（5 秒宽限，避免抖动）。主工作树永不自动注销。没有"自动/手动"开关，也不需要手动注册。
 - **墓碑机制**：你手动删除某个 worktree 的工作区 = 那一行**直接消失**（不留"已忽略"占位），插件也不再自动重建它；想恢复就把那个目录重新"添加工作区"，插件随即接手管理（分支改名继续跟随）。
@@ -15,7 +17,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ## 实现方式（遮蔽说明）
 
-本插件以更低优先级（-1）**遮蔽（shadow）**官方 `sidebar.workspaces` 槽位。官方 `ui-workspace` 插件仍正常加载——它的 `uiWorkspace` 服务、`useWorkspaces` 数据钩子、会话选择器等都由本插件复用，仅左侧栏浏览区由本插件的派生版本渲染。升级 DSH 后若官方浏览器行为变化，需要同步派生新版本。
+本插件以更低优先级（-1）**遮蔽（shadow）**官方 `sidebar.workspaces` 与 `conversation.hero.workspace` 槽位。官方 `ui-workspace` 插件仍正常加载，插件复用它的 `uiWorkspace` 服务和 `useWorkspaces` 数据钩子，只替换左侧栏浏览区和新会话工作区选择器。升级 DSH 后若官方行为变化，需要同步派生新版本。
 
 ## 安装 / 卸载对既有数据的影响
 
@@ -35,7 +37,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ## 已验证（0.1.5-rc.2，真实宿主）
 
-1. `pnpm typecheck`、`pnpm build`、`pnpm test`（37 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态持久化、真实 git 仓库驱动的服务集成（含既有会话迁移、墓碑解除、项目重命名、端点面收敛）、客户端层级折叠（含"删除后不再补回行"）、构建产物冒烟）全部通过。
+1. `pnpm typecheck`、`pnpm build`、`pnpm test`（44 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态持久化、真实 git 仓库驱动的服务集成、客户端层级与选择器分组、拖动边界、构建产物冒烟）全部通过。
 2. 隔离 `DSH_HOME` 启动真实 `dsh web`，通过官方 RPC 添加仓库主目录：两个 linked worktree 在数秒内被自动注册，以分支名命名，紧跟主工作区排序。
 3. `git worktree add`/`remove` 实时联动（fs.watch + 轮询兜底）；目录消失与 git 枚举消失都走宽限注销。
 4. 手动删除 worktree 工作区 → 那一行立即消失且不再自动重建（宿主实测：工作区列表保持干净）；把该目录重新添加回来 → 墓碑自动清除，插件重新接管（分支改名继续跟随）。
@@ -62,6 +64,14 @@ pnpm install
 pnpm typecheck && pnpm build && pnpm test
 ```
 
+启动一套使用临时 `DSH_HOME` 的真实隔离 DSH，并自动创建两个虚构 Git 仓库和 5 个 worktree：
+
+```sh
+pnpm demo
+```
+
+终端会输出带一次性本地 token 的访问地址。演示使用真实 DSH、真实插件和真实 Git worktree；按 `Ctrl+C` 后会停止服务并删除全部临时数据。未全局安装 `dsh` 时，macOS 会自动使用 DSH Desktop Beta 内置 CLI；其他环境可通过 `DSH_BIN=/path/to/dsh pnpm demo` 指定。
+
 `--patch` 覆盖层开发（无需安装到 profile）：
 
 ```sh
@@ -80,7 +90,7 @@ ln -s ~/.dsh/profiles/node_modules/@deepseek-ai node_modules/@deepseek-ai
 ```
 浏览器 client 半                          宿主 host 半
 ┌─────────────────────────┐   /api RPC    ┌──────────────────────────┐
-│ 遮蔽 sidebar.workspaces  │ ────────────▶ │ WorktreeSyncService       │
+│ 遮蔽侧栏与新会话选择器     │ ────────────▶ │ WorktreeSyncService       │
 │ 项目→worktree→会话 树渲染 │ ◀──────────── │ · git worktree 扫描/监听  │
 │ useWorkspaces/useSessions│   全量快照     │ · 同步引擎(注册/注销/改名)  │
 └─────────────────────────┘              │ · 墓碑与每仓库开关(持久化)  │
@@ -88,9 +98,9 @@ ln -s ~/.dsh/profiles/node_modules/@deepseek-ai node_modules/@deepseek-ai
                                          └──────────────────────────┘
 ```
 
-- **RPC**：宿主在共享 `/api` 通道上注册精确 Fetch 路由（`/api/left-panel/<endpoint>`，Connection RPC 信封），浏览器端继续用 `connection.rpc.call('/api', 'left-panel/<endpoint>')`。鉴权与 Host/Origin 围栏完全复用官方通道，插件零自建鉴权。端点只有三个：`list`（读快照）、`sync`（重扫并回读，即菜单的「刷新」）、`setRepoName`（项目显示名）。
+- **RPC**：宿主在共享 `/api` 通道上注册精确 Fetch 路由（`/api/left-panel/<endpoint>`，Connection RPC 信封），浏览器端继续用 `connection.rpc.call('/api', 'left-panel/<endpoint>')`。鉴权与 Host/Origin 围栏完全复用官方通道，插件零自建鉴权。端点为 `list`、`sync`、`setRepoName` 和按项目校验重名的 `setWorkspaceTitle`。
 - **同步引擎**（`src/sync.ts`，纯函数）：决定 create/delete/retitle；分支切换会跟随改名，用户手工改名后不再覆盖；主工作树不自动删除；移除走 `REMOVAL_GRACE_MS` 宽限防抖。
-- **状态**：`~/.dsh/storages/dsh-left-panel.json`（原子写；`DSH_HOME` 可重定位），存墓碑、每仓库开关、已知 worktree 与插件命名记录。
+- **状态**：`~/.dsh/storages/dsh-left-panel.json`（原子写；`DSH_HOME` 可重定位），存墓碑、项目显示名、已知 worktree 与插件命名记录。
 - **触发**：启动、`domain/changed`（区分插件自删与用户删除）、`fs.watch` 仓库 `.git` 目录（去抖 400ms）、30s 轮询兜底、客户端主动 sync。
 - **git 访问**（`src/git.ts`）：固定 argv spawn，环境变量清洗（剔除 `*KEY*/*SECRET*/*TOKEN*/*PASSWORD*`），15s 超时，只读命令。
 

@@ -12,6 +12,8 @@
   },
   "files": [
     "lib",
+    "demo",
+    "docs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -31,6 +33,7 @@
     "build": "pnpm clean && pnpm build:host && pnpm build:client",
     "build:host": "tsc -p tsconfig.build.json",
     "build:client": "tsdown",
+    "demo": "pnpm build && node demo/dsh.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "prepare": "pnpm build",
     "prepack": "pnpm build"
