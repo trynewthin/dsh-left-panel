@@ -252,16 +252,18 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.onToggle - expand/collapse the repository.
  * @param props.onSync - reconcile this repository's worktrees now.
  * @param props.onSetAuto - switch automatic registration.
+ * @param props.onRename - open the browser-owned rename dialog for this repository.
  * @param props.syncing - a reconcile is in flight.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, home, t }: {
+export function RepoRowItem({ section, onToggle, onSync, onSetAuto, onRename, syncing, home, t }: {
   section: RepoSection
   onToggle: () => void
   onSync: () => void
   onSetAuto: (auto: boolean) => void
+  onRename: () => void
   syncing: boolean
   home?: string | undefined
   t: RowTranslate
@@ -273,6 +275,7 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
   // when something needs attention (a scan failure or a reconcile in flight).
   const meta = repo.error !== undefined ? '!' : syncing ? t('repo.syncing') : undefined
   const menuItems = [
+    { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'sync', label: t('repo.menu.sync') },
     { id: 'auto', label: t(repo.auto ? 'repo.menu.autoOff' : 'repo.menu.autoOn') },
   ]
@@ -302,6 +305,7 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, syncing, hom
           items={menuItems}
           onSelect={(id) => {
             setMenuOpen(false)
+            if (id === 'rename') onRename()
             if (id === 'sync') onSync()
             if (id === 'auto') onSetAuto(!repo.auto)
           }}

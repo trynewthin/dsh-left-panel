@@ -13,6 +13,8 @@ export interface PersistedState {
   readonly repoAuto: Readonly<Record<string, boolean>>
   readonly knownWorktrees: Readonly<Record<string, string>>
   readonly autoTitles: Readonly<Record<string, string>>
+  /** Display name per repository key; empty means "derive it from the main worktree". */
+  readonly repoNames: Readonly<Record<string, string>>
 }
 
 export const EMPTY_STATE: PersistedState = {
@@ -21,6 +23,7 @@ export const EMPTY_STATE: PersistedState = {
   repoAuto: {},
   knownWorktrees: {},
   autoTitles: {},
+  repoNames: {},
 }
 
 /** Default location next to DSH's own storages; DSH_HOME overrides the base directory. */
@@ -57,6 +60,7 @@ export function normalizeState(value: unknown): PersistedState {
     repoAuto: booleanRecord(value.repoAuto),
     knownWorktrees: stringRecord(value.knownWorktrees),
     autoTitles: stringRecord(value.autoTitles),
+    repoNames: stringRecord(value.repoNames),
   }
 }
 

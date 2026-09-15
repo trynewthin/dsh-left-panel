@@ -341,6 +341,20 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.equal((await registry.resolveByPath(threePath))?.title, 'three')
   })
 
+  await t.test('renames a repository without touching DSH data, and restores the derived default', async () => {
+    const repoKey = harness.service.snapshot().repos[0]?.key
+    assert.ok(repoKey)
+    assert.equal(harness.service.snapshot().repos[0]?.name, 'repo', 'derived from the main worktree')
+    const renamed = await harness.rpc('setRepoName', { repoKey, name: '  左栏实验  ' })
+    assert.equal(renamed.repos[0]?.name, '左栏实验', 'trimmed')
+    assert.deepEqual((await loadState(join(root, 'state.json'))).state.repoNames, { [repoKey]: '左栏实验' })
+    const reset = await harness.rpc('setRepoName', { repoKey, name: '' })
+    assert.equal(reset.repos[0]?.name, 'repo')
+    assert.deepEqual((await loadState(join(root, 'state.json'))).state.repoNames, {})
+    await assert.rejects(harness.rpc('setRepoName', { repoKey: '/nope/.git', name: 'x' }), /unknown-repository/)
+    await assert.rejects(harness.rpc('setRepoName', { repoKey }), /bad-request/)
+  })
+
   await t.test('rejects paths outside the scanned worktrees and unknown endpoints', async () => {
     await assert.rejects(harness.rpc('register', { path: root }), /unknown-worktree/)
     await assert.rejects(harness.rpc('ignore', {}), /bad-request/)

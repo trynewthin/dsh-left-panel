@@ -22,10 +22,13 @@ export const ENDPOINT_PREFIX = 'left-panel'
  * - `unignore`: allow automatic registration again (an automatic repository registers it at once).
  * - `register`: register one worktree now, clearing any ignore.
  * - `setRepoAuto`: switch automatic registration for one repository.
+ * - `setRepoName`: set the repository's display name; an empty name restores the derived one.
  */
-export type Endpoint = 'list' | 'sync' | 'ignore' | 'unignore' | 'register' | 'setRepoAuto'
+export type Endpoint = 'list' | 'sync' | 'ignore' | 'unignore' | 'register' | 'setRepoAuto' | 'setRepoName'
 
-export const ENDPOINTS: readonly Endpoint[] = ['list', 'sync', 'ignore', 'unignore', 'register', 'setRepoAuto']
+export const ENDPOINTS: readonly Endpoint[] = [
+  'list', 'sync', 'ignore', 'unignore', 'register', 'setRepoAuto', 'setRepoName',
+]
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */
 export function methodOf(endpoint: Endpoint): string {
@@ -61,7 +64,7 @@ export interface WorktreeInfo {
 export interface RepoInfo {
   /** Canonical common git dir; stable identity of the repository. */
   readonly key: string
-  /** Display name: basename of the main worktree. */
+  /** Display name: the name the user gave this repository, else basename of the main worktree. */
   readonly name: string
   /** Canonical path of the main worktree. */
   readonly mainPath: string
@@ -84,4 +87,6 @@ export interface WorktreeSnapshot {
 
 export interface IgnoreRequest { readonly path: string }
 export interface SetRepoAutoRequest { readonly repoKey: string; readonly auto: boolean }
+/** Empty `name` restores the derived display name. */
+export interface SetRepoNameRequest { readonly repoKey: string; readonly name: string }
 export interface RegisterRequest { readonly path: string }

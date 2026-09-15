@@ -31,6 +31,7 @@ test('save then load round-trips and creates parent directories', async () => {
       repoAuto: { '/repo/.git': false },
       knownWorktrees: { '/wt/y': '/repo/.git' },
       autoTitles: { '/wt/y': 'feat/y' },
+      repoNames: { '/repo/.git': '项目别名' },
     }
     await saveState(file, state)
     const loaded = await loadState(file)
@@ -56,6 +57,7 @@ test('normalizeState drops malformed fields and duplicate ignores', () => {
     repoAuto: { ok: true, bad: 'yes' },
     knownWorktrees: { '/wt': '/repo', broken: 1 },
     autoTitles: null,
+    repoNames: { ok: 'alias', bad: 7 },
   })
   assert.deepEqual(state, {
     version: 1,
@@ -63,6 +65,7 @@ test('normalizeState drops malformed fields and duplicate ignores', () => {
     repoAuto: { ok: true },
     knownWorktrees: { '/wt': '/repo' },
     autoTitles: {},
+    repoNames: { ok: 'alias' },
   })
   assert.deepEqual(normalizeState('nope'), EMPTY_STATE)
 })

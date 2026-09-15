@@ -42,6 +42,8 @@ const DEFAULT_POLL_MS = 30_000
 const DEFAULT_DEBOUNCE_MS = 400
 /** How long a self-issued delete stays recognizable in the change stream. */
 const SELF_DELETE_TTL_MS = 5_000
+/** Upper bound on a user-given repository display name. */
+const REPO_NAME_MAX = 120
 
 interface FailedRepo {
   readonly mainPath: string
@@ -199,7 +201,7 @@ export class WorktreeSyncService {
       }
       return {
         key: repo.key,
-        name: basename(repo.mainPath) || repo.mainPath,
+        name: state.repoNames[repo.key] ?? (basename(repo.mainPath) || repo.mainPath),
         mainPath: repo.mainPath,
         auto: state.repoAuto[repo.key] ?? true,
         worktrees,
@@ -208,7 +210,7 @@ export class WorktreeSyncService {
     for (const [key, failed] of this.failedRepos) {
       repos.push({
         key,
-        name: basename(failed.mainPath) || failed.mainPath,
+        name: state.repoNames[key] ?? (basename(failed.mainPath) || failed.mainPath),
         mainPath: failed.mainPath,
         auto: state.repoAuto[key] ?? true,
         worktrees: [],
@@ -553,6 +555,26 @@ export class WorktreeSyncService {
           }
           await this.store.update(state => ({ ...state, repoAuto: { ...state.repoAuto, [repoKey]: auto } }))
           await this.syncNow()
+          return ok(this.snapshot())
+        }
+        case 'setRepoName': {
+          const repoKey = stringField(payload, 'repoKey')
+          if (repoKey === undefined) return fail('left-panel/bad-request', 'setRepoName requires repoKey')
+          if (!this.repos.some(repo => repo.key === repoKey) && !this.failedRepos.has(repoKey)) {
+            return fail('left-panel/unknown-repository', `${repoKey} is not a scanned repository`, { repoKey })
+          }
+          const raw = typeof (payload as Record<string, unknown>)?.name === 'string'
+            ? (payload as Record<string, string>).name
+            : undefined
+          if (raw === undefined) return fail('left-panel/bad-request', 'setRepoName requires name')
+          const name = raw.trim().slice(0, REPO_NAME_MAX)
+          await this.store.update(state => {
+            const repoNames = { ...state.repoNames }
+            // An empty name restores the derived default rather than storing one.
+            if (name === '') delete repoNames[repoKey]
+            else repoNames[repoKey] = name
+            return { ...state, repoNames }
+          })
           return ok(this.snapshot())
         }
         default:

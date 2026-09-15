@@ -265,6 +265,8 @@ type SessionTreeProps = Pick<
   archivedSessionIds: readonly SessionNode['id'][]
   /** Open the browser-owned rename dialog for a real Workspace group. */
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
+  /** Open the browser-owned rename dialog for a repository node. */
+  onRepoRenameRequest: (repoKey: string, currentName: string) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned session rename dialog. */
@@ -283,7 +285,7 @@ type SessionTreeProps = Pick<
 function SessionTree({
   useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds,
   workspaceReady, usePanelInfo,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -647,6 +649,7 @@ function SessionTree({
                 onSetAuto={(auto) => {
                   worktrees.setRepoAuto(section.repo.key, auto).catch(warnRejected('repository auto sync'))
                 }}
+                onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
               />
               {section.expanded && section.groups.map(group => renderGroup(group, true))}
               {section.expanded && section.ghosts.length > 0 && (
@@ -1166,6 +1169,33 @@ export function WorkspaceBrowser({
     })
   }
 
+  // Repository rename dialog: the name lives in the plugin's own state (the
+  // repository is not a DSH Workspace), so it is one Host round-trip and, being
+  // plugin-owned, disappears with the plugin.
+  const [repoRenameTarget, setRepoRenameTarget] = useState<{ repoKey: string; currentName: string } | null>(null)
+  const [repoRenameDraft, setRepoRenameDraft] = useState('')
+  const [repoRenaming, setRepoRenaming] = useState(false)
+  const [repoRenameError, setRepoRenameError] = useState<string | null>(null)
+  const repoRenameTrimmed = repoRenameDraft.trim()
+  const closeRepoRename = () => {
+    if (repoRenaming) return
+    setRepoRenameTarget(null)
+    setRepoRenameError(null)
+  }
+  const confirmRepoRename = () => {
+    /* v8 ignore next -- the Modal is absent without a target and its button is disabled while renaming. */
+    if (repoRenameTarget === null || repoRenaming) return
+    setRepoRenaming(true)
+    setRepoRenameError(null)
+    worktrees.setRepoName(repoRenameTarget.repoKey, repoRenameTrimmed).then(() => {
+      setRepoRenaming(false)
+      setRepoRenameTarget(null)
+    }).catch((reason: unknown) => {
+      setRepoRenaming(false)
+      setRepoRenameError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
   const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
@@ -1381,6 +1411,11 @@ export function WorkspaceBrowser({
                   setDeleteTarget({ workspaceId, title })
                   setDeleteError(null)
                 }}
+                onRepoRenameRequest={(repoKey, currentName) => {
+                  setRepoRenameTarget({ repoKey, currentName })
+                  setRepoRenameDraft(currentName)
+                  setRepoRenameError(null)
+                }}
               />
             ))}
       </div>
@@ -1418,6 +1453,40 @@ export function WorkspaceBrowser({
           <div className={css.renameError} role="alert">{t('conflict.named', { name: renameTrimmed })}</div>
         )}
         {renameError !== null && <div className={css.renameError} role="alert">{renameError}</div>}
+      </Modal>
+
+      <Modal
+        open={repoRenameTarget !== null}
+        onClose={closeRepoRename}
+        closeLabel={t('close')}
+        title={t('repo.rename.title')}
+        description={t('repo.rename.hint')}
+        footer={(
+          <>
+            <Button variant="outline" disabled={repoRenaming} onClick={closeRepoRename}>{t('cancel')}</Button>
+            <Button variant="primary" disabled={repoRenaming} onClick={confirmRepoRename}>{t('rename')}</Button>
+          </>
+        )}
+      >
+        <input
+          className={css.renameInput}
+          value={repoRenameDraft}
+          aria-label={t('field.repoName')}
+          placeholder={repoRenameTarget?.currentName ?? ''}
+          autoFocus
+          disabled={repoRenaming}
+          onFocus={(e) => { e.target.select() }}
+          onChange={(e) => { setRepoRenameDraft(e.target.value); setRepoRenameError(null) }}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => { composingRef.current = false }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !composingRef.current) {
+              e.preventDefault()
+              confirmRepoRename()
+            }
+          }}
+        />
+        {repoRenameError !== null && <div className={css.renameError} role="alert">{repoRenameError}</div>}
       </Modal>
 
       <Modal

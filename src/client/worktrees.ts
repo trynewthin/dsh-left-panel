@@ -19,6 +19,8 @@ export interface WorktreeActions {
   register(path: string): Promise<void>
   /** Switch automatic registration for a repository. */
   setRepoAuto(repoKey: string, auto: boolean): Promise<void>
+  /** Set a repository's display name; an empty name restores the derived one. */
+  setRepoName(repoKey: string, name: string): Promise<void>
 }
 
 export interface WorktreeClient {
@@ -68,6 +70,7 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
       sync: () => call('sync'),
       register: path => call('register', { path }),
       setRepoAuto: (repoKey, auto) => call('setRepoAuto', { repoKey, auto }),
+      setRepoName: (repoKey, name) => call('setRepoName', { repoKey, name }),
     },
     start() {
       refresh()
