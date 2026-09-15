@@ -108,5 +108,13 @@
   "author": {
     "name": "trynewthin",
     "email": "an172048@outlook.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trynewthin/dsh-left-panel.git"
+  },
+  "homepage": "https://github.com/trynewthin/dsh-left-panel#readme",
+  "bugs": {
+    "url": "https://github.com/trynewthin/dsh-left-panel/issues"
   }
 }

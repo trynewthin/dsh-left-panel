@@ -45,10 +45,10 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ```sh
 # 本地路径（需要 pnpm）
-dsh plugin --profile web add /Users/anzelin/Projects/Personal/Deepseek/left-panel
+dsh plugin --profile web add /abs/path/to/left-panel
 
 # 未全局安装 dsh CLI 时
-npx @deepseek-ai/dsh plugin --profile web add /Users/anzelin/Projects/Personal/Deepseek/left-panel
+npx @deepseek-ai/dsh plugin --profile web add /abs/path/to/left-panel
 ```
 
 安装或首次加入 bundle 图后重启 `dsh web`；client 更新后浏览器硬刷新。
