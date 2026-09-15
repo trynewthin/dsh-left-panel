@@ -250,15 +250,18 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.onToggle - expand/collapse the repository.
  * @param props.onRefresh - reconcile this repository's worktrees now.
  * @param props.onRename - open the browser-owned rename dialog for this repository.
+ * @param props.drag - optional node-row drag wiring (moves the whole repository block).
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onRefresh, onRename, home, t }: {
+export function RepoRowItem({ section, onToggle, onRefresh, onRename, drag, home, t }: {
   section: RepoSection
   onToggle: () => void
   onRefresh: () => void
   onRename: () => void
+  /** Present when the node can be reordered among the other sections. */
+  drag?: WorkspaceRowDragProps | undefined
   home?: string | undefined
   t: RowTranslate
 }) {
@@ -277,6 +280,15 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, home, t }:
       role="treeitem"
       aria-expanded={section.expanded}
       onClick={onToggle}
+      draggable={drag !== undefined}
+      onDragStart={drag === undefined
+        ? undefined
+        : (e) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/plain', section.key)
+          drag.start()
+        }}
+      onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
         {section.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}

@@ -28,7 +28,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SessionNode, SessionOrderBy, TreeSection } from '../tree.ts'
 import {
-  arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, repoGroupKey, UNGROUPED_KEY,
+  arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, planWorkspaceMove,
+  repoGroupKey, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
@@ -225,10 +226,11 @@ interface DragState {
   over: { id: SessionNode['id']; half: 'before' | 'after' } | null
 }
 
-/** In-flight Workspace-row drag: source identity plus the current marker. */
+/** In-flight Workspace-row drag: the moving block (one row, or a whole repository) plus the marker. */
 interface WorkspaceDragState {
-  workspaceId: WorkspaceId
-  over: { id: WorkspaceId; half: 'before' | 'after' } | null
+  /** Workspace ids the drag carries, in durable order. */
+  ids: readonly string[]
+  over: { id: string; half: 'before' | 'after' } | null
 }
 
 /** Resolve an insertion side from the full rendered workspace group. */
@@ -446,18 +448,19 @@ function SessionTree({
     if (workspaceDropCommitted.current) return
     workspaceDropCommitted.current = true
     setWorkspaceDrag(null)
-    const rowIndex = workspaces.findIndex(workspace => workspace.workspaceId === over.id)
-    if (rowIndex === -1) return
-    const anchor = over.half === 'before' ? over.id : workspaces[rowIndex + 1]?.workspaceId
-    if (anchor === activeDrag.workspaceId) return
-    const sourceIndex = workspaces.findIndex(workspace => workspace.workspaceId === activeDrag.workspaceId)
-    const anchorIndex = anchor === undefined
-      ? workspaces.length
-      : workspaces.findIndex(workspace => workspace.workspaceId === anchor)
-    if (sourceIndex !== -1 && (anchorIndex === sourceIndex || anchorIndex === sourceIndex + 1)) return
-    insertWorkspaceBefore(activeDrag.workspaceId, anchor).catch((reason: unknown) => {
-      console.warn('workspace reorder rejected:', reason)
-    })
+    const move = planWorkspaceMove(
+      workspaces.map(workspace => workspace.workspaceId as string),
+      activeDrag.ids,
+      over,
+    )
+    if (move === undefined) return
+    // Each Workspace lands in front of the same anchor, so the block keeps its
+    // internal order and the durable Host order carries the new arrangement.
+    void (async () => {
+      for (const id of move.ids) {
+        await insertWorkspaceBefore(id as WorkspaceId, move.anchor as WorkspaceId | undefined)
+      }
+    })().catch((reason: unknown) => { console.warn('workspace reorder rejected:', reason) })
   }
   /**
    * One Workspace group: header row + expanded top-level session rows. Nested
@@ -473,7 +476,7 @@ function SessionTree({
     const workspaceDragProps = workspaceId === undefined || nested ? undefined : {
       start: () => {
         workspaceDropCommitted.current = false
-        setWorkspaceDrag({ workspaceId, over: null })
+        setWorkspaceDrag({ ids: [workspaceId as string], over: null })
       },
       end: () => {
         if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
@@ -612,8 +615,13 @@ function SessionTree({
       </div>
     )
   }
-  const workspaceDropAtListStart = groups[0]?.workspaceId !== undefined
-    && workspaceDrag?.over?.id === groups[0].workspaceId
+  const firstRowId = (() => {
+    const first = sections[0]
+    if (first === undefined) return undefined
+    return first.kind === 'group' ? (first.group.workspaceId as string | undefined) : first.workspaceIds[0]
+  })()
+  const workspaceDropAtListStart = firstRowId !== undefined
+    && workspaceDrag?.over?.id === firstRowId
     && workspaceDrag.over.half === 'before'
 
   return (
@@ -629,12 +637,53 @@ function SessionTree({
         )}
         {sections.map((section) => {
           if (section.kind === 'group') return renderGroup(section.group, false)
+          // The node is reordered by moving its Workspaces as one block, so the
+          // durable Host order still reads sensibly outside this plugin.
+          const anchorId = section.workspaceIds[0]
+          const sectionMarker = anchorId !== undefined && workspaceDrag?.over?.id === anchorId
+            ? workspaceDrag.over.half
+            : null
+          const nodeDrag = anchorId === undefined ? undefined : {
+            start: () => {
+              workspaceDropCommitted.current = false
+              setWorkspaceDrag({ ids: section.workspaceIds, over: null })
+            },
+            end: () => {
+              if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
+                commitWorkspaceDrag(workspaceDrag, workspaceDrag.over)
+              } else {
+                setWorkspaceDrag(null)
+              }
+              workspaceDropCommitted.current = false
+            },
+          }
           return (
-            <div key={section.key} className={css.groupSection}>
+            <div
+              key={section.key}
+              className={clsx(
+                css.groupSection,
+                sectionMarker === 'before' && css.workspaceDropBefore,
+                sectionMarker === 'after' && css.workspaceDropAfter,
+              )}
+              onDragOver={workspaceDrag === null || anchorId === undefined
+                ? undefined
+                : (e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setWorkspaceDrag(active => (active === null ? active : { ...active, over: { id: anchorId, half: workspaceGroupHalf(e) } }))
+                }}
+              onDrop={workspaceDrag === null || anchorId === undefined
+                ? undefined
+                : (e) => {
+                  e.preventDefault()
+                  commitWorkspaceDrag(workspaceDrag, { id: anchorId, half: workspaceGroupHalf(e) })
+                }}
+            >
               <RepoRowItem
                 section={section}
                 home={home}
                 t={t}
+                drag={nodeDrag}
                 onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
                 onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
                 onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}

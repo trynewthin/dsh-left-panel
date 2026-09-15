@@ -464,6 +464,12 @@ export interface RepoSection {
   containsCurrent: boolean
   /** Worktree Workspace groups, main worktree first, then by title. */
   groups: readonly GroupNode[]
+  /**
+   * The repository's Workspace ids in durable Host order. The first one fixes
+   * the node's position among the other sections, and dragging the node moves
+   * them all as one block.
+   */
+  workspaceIds: readonly string[]
 }
 
 /** A Workspace outside every scanned repository, rendered exactly as before. */
@@ -515,6 +521,7 @@ export function arrangeSections(
       expanded: groupExpansion[key] ?? true,
       containsCurrent: false,
       groups: bucket,
+      workspaceIds: [],
     })
     buckets.set(repo.key, bucket)
     return bucket
@@ -532,6 +539,55 @@ export function arrangeSections(
   return sections.map((section) => {
     if (section.kind !== 'repo') return section
     const ordered = [...section.groups].sort(compareWorktreeGroups(section.repo.mainPath))
-    return { ...section, groups: ordered, containsCurrent: ordered.some(group => group.containsCurrent) }
+    return {
+      ...section,
+      groups: ordered,
+      containsCurrent: ordered.some(group => group.containsCurrent),
+      workspaceIds: section.groups.flatMap(group => (group.workspaceId === undefined ? [] : [group.workspaceId as string])),
+    }
   })
+}
+
+/** Workspaces to move as one block, and the workspace they land before (undefined appends). */
+export interface WorkspaceMove {
+  readonly ids: readonly string[]
+  readonly anchor: string | undefined
+}
+
+/**
+ * Resolve a workspace drag against the durable Host order: which Workspaces
+ * move (a repository node moves all of its Workspaces as one block, a plain row
+ * moves itself) and which Workspace they land in front of.
+ *
+ * The rendered order is the Host order, so the drop target's position in that
+ * order is what the anchor is computed from. A drop that would not change the
+ * order resolves to undefined.
+ * @param order - durable Workspace ids, in Host order.
+ * @param moving - Workspaces the drag carries.
+ * @param target - the row dropped on and which half of it.
+ * @returns the resolved move, or undefined when the order cannot change.
+ */
+export function planWorkspaceMove(
+  order: readonly string[],
+  moving: readonly string[],
+  target: { readonly id: string; readonly half: 'before' | 'after' },
+): WorkspaceMove | undefined {
+  const block = order.filter(id => moving.includes(id))
+  if (block.length === 0) return undefined
+  const blockSet = new Set(block)
+  // A drop onto the moving block itself never reorders anything.
+  if (blockSet.has(target.id)) return undefined
+  const targetIndex = order.indexOf(target.id)
+  if (targetIndex === -1) return undefined
+  let anchorIndex = targetIndex
+  if (target.half === 'after') {
+    anchorIndex += 1
+    while (anchorIndex < order.length && blockSet.has(order[anchorIndex] as string)) anchorIndex += 1
+  }
+  const anchor = anchorIndex >= order.length ? undefined : order[anchorIndex]
+  const without = order.filter(id => !blockSet.has(id))
+  const insertAt = anchor === undefined ? without.length : without.indexOf(anchor)
+  const next = [...without.slice(0, insertAt), ...block, ...without.slice(insertAt)]
+  if (next.length === order.length && next.every((id, index) => id === order[index])) return undefined
+  return { ids: block, anchor }
 }
