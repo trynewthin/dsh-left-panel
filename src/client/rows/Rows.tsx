@@ -226,14 +226,13 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   )
 }
 
-/** Hover-card body for a repository node: name, main worktree path, automation state, scan error. */
+/** Hover-card body for a repository node: name, main worktree path, scan error. */
 function RepoHoverContent({ section, home, t }: { section: RepoSection; home: string | undefined; t: RowTranslate }) {
   const { repo } = section
   return (
     <div className={css.hoverContent}>
       <div className={css.hoverTitle}>{repo.name}</div>
       <div className={css.hoverPath}>{abbreviateHomePath(repo.mainPath, home)}</div>
-      <div className={css.hoverTime}>{t(repo.auto ? 'repo.hover.auto.on' : 'repo.hover.auto.off')}</div>
       {repo.error !== undefined && (
         <div className={css.hoverStatus}>
           <StateDot state="warning" />
