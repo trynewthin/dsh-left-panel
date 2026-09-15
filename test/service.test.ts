@@ -214,6 +214,10 @@ test('worktree sync end to end against a real repository', async (t) => {
     // A session that already lived in the linked worktree before its Workspace
     // existed: it sat under Ungrouped and must be adopted on registration.
     { id: 'session-orphan', cwd: await realpath(featPath) },
+    // A session created by naming the main worktree directory directly, while
+    // that Workspace was already registered: it never entered the ledger and
+    // must be adopted by the self-healing pass.
+    { id: 'session-cwd-only', cwd: await realpath(repo) },
   ])
   const main = await registry.create(repo, 'repo')
   const harness = createHarness(registry, join(root, 'state.json'))
@@ -243,6 +247,10 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.deepEqual(feat.sessionIds, ['session-orphan'])
     // A session from another directory is never adopted, even if offered.
     await assert.rejects(feat.attachSession('session-elsewhere'))
+  })
+
+  await t.test('adopts a session that named an already-registered worktree directory', async () => {
+    assert.deepEqual(main.sessionIds, ['session-cwd-only'])
   })
 
   await t.test('follows a branch switch while the plugin-assigned title is untouched', async () => {

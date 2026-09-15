@@ -318,14 +318,19 @@ export class WorktreeSyncService {
     const known = new Map(plan.knownWorktrees)
     const titles: Record<string, string> = { ...state.autoTitles }
     const released = new Set(plan.releaseIgnored)
-    // Sessions that already live in a worktree directory predate its Workspace
-    // registration (they sat under Ungrouped). Membership is the Workspace's
-    // durable session ledger, so a registered worktree adopts them explicitly;
-    // attachSession re-validates the canonical cwd, so this can never move a
-    // session into the wrong directory.
-    const ungrouped = plan.actions.some(action => action.type === 'create')
-      ? await this.sessionsByDirectory()
-      : new Map<string, readonly SessionId[]>()
+    // Sessions that were created by naming a directory rather than a Workspace
+    // (another tool's launch, an explicit cwd) never entered any ledger, so
+    // they sit under Ungrouped even though a Workspace now covers their
+    // directory. Re-adopt them per registered worktree; attachSession
+    // re-validates the canonical cwd, so this can never move a session into the
+    // wrong directory. Running on every reconcile makes the grouping self-healing.
+    const storedSessions = await this.sessionsByDirectory()
+    for (const [path, workspaceId] of this.registeredWorktreePaths()) {
+      const candidates = storedSessions.get(path)
+      if (candidates === undefined) continue
+      const workspace = this.ctx.workspaceRegistry.get(workspaceId as WorkspaceId)
+      if (workspace !== undefined) await this.adoptExistingSessions(workspace, candidates)
+    }
     for (const action of plan.actions) {
       switch (action.type) {
         case 'create': {
@@ -335,7 +340,7 @@ export class WorktreeSyncService {
             titles[action.path] = action.title
             await this.placeAfterRepo(workspace.id, action.repoKey, action.mainWorkspaceId)
             this.ctx.logger.info(`left-panel: registered worktree ${action.path} as "${action.title}"`)
-            await this.adoptExistingSessions(workspace, ungrouped.get(action.path) ?? [])
+            await this.adoptExistingSessions(workspace, storedSessions.get(action.path) ?? [])
           } catch (error) {
             this.ctx.logger.warn(`left-panel: could not register ${action.path}: ${String(error)}`)
           }
@@ -377,6 +382,20 @@ export class WorktreeSyncService {
       autoTitles: titles,
     }
     if (!sameState(state, next)) await this.store.update(() => next)
+  }
+
+  /** Registered Workspace id per scanned worktree path, for adoption and placement. */
+  private registeredWorktreePaths(): Map<string, string> {
+    const byPath = new Map(this.registry.map(workspace => [workspace.path, workspace.id]))
+    const registered = new Map<string, string>()
+    for (const repo of this.repos) {
+      for (const worktree of repo.worktrees) {
+        if (worktree.bare) continue
+        const id = byPath.get(worktree.path)
+        if (id !== undefined) registered.set(worktree.path, id)
+      }
+    }
+    return registered
   }
 
   /** Stored sessions grouped by canonical cwd, for adopting orphans into a new worktree Workspace. */
