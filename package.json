@@ -11,12 +11,10 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/client.js.map",
-    "lib/*.js",
+    "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "dsh-plugin",
@@ -34,7 +32,8 @@
     "build:host": "tsc -p tsconfig.build.json",
     "build:client": "tsdown",
     "test": "node --import tsx --test test/*.test.ts",
-    "prepare": "pnpm build"
+    "prepare": "pnpm build",
+    "prepack": "pnpm build"
   },
   "dsh": {
     "bundle": {
@@ -105,5 +104,9 @@
     "tsdown": "^0.23.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"
+  },
+  "author": {
+    "name": "trynewthin",
+    "email": "an172048@outlook.com"
   }
 }

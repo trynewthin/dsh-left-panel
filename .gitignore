@@ -2,3 +2,4 @@ node_modules/
 lib/
 dev.patch.yml
 .DS_Store
+*.tgz
