@@ -30,7 +30,7 @@ import type { GroupNode, SessionNode, SessionOrderBy, TreeSection } from '../tre
 import {
   arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, repoGroupKey, UNGROUPED_KEY,
 } from '../tree.ts'
-import { GhostWorktreeItem, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
 import type { WorktreeSnapshot } from '../../protocol.ts'
 import css from './WorkspaceBrowser.module.css'
@@ -373,14 +373,6 @@ function SessionTree({
     () => arrangeSections(groups, snapshot, groupExpansion),
     [groups, snapshot, groupExpansion],
   )
-  // One worktree action at a time per row; the row disappears or changes state on the snapshot echo.
-  const [ghostBusy, setGhostBusy] = useState<string | null>(null)
-  const runWorktreeAction = (path: string, action: () => Promise<void>): void => {
-    setGhostBusy(path)
-    action()
-      .catch((reason: unknown) => { console.warn('worktree action rejected:', reason) })
-      .finally(() => { setGhostBusy(current => (current === path ? null : current)) })
-  }
   const warnRejected = (what: string) => (reason: unknown): void => { console.warn(`${what} rejected:`, reason) }
   useEffect(() => {
     if (revealGroup === undefined || groupExpansion[revealGroup] === true) return
@@ -643,28 +635,11 @@ function SessionTree({
                 section={section}
                 home={home}
                 t={t}
-                syncing={snapshot.syncing}
                 onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
-                onSync={() => { worktrees.sync().catch(warnRejected('worktree sync')) }}
-                onSetAuto={(auto) => {
-                  worktrees.setRepoAuto(section.repo.key, auto).catch(warnRejected('repository auto sync'))
-                }}
+                onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
                 onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
               />
               {section.expanded && section.groups.map(group => renderGroup(group, true))}
-              {section.expanded && section.ghosts.length > 0 && (
-                <div className={css.nestedSection}>
-                  {section.ghosts.map(ghost => (
-                    <GhostWorktreeItem
-                      key={ghost.path}
-                      worktree={ghost}
-                      busy={ghostBusy === ghost.path}
-                      t={t}
-                      onRegister={() => { runWorktreeAction(ghost.path, () => worktrees.register(ghost.path)) }}
-                    />
-                  ))}
-                </div>
-              )}
             </div>
           )
         })}

@@ -2,7 +2,7 @@
  * Browser-side view of the host's worktree snapshot: one observable the slot
  * renderer binds into `useWorktrees`, refreshed by polling, by every Workspace
  * change, and after each action the user takes. Actions resolve once the host
- * has reconciled and answered with the resulting snapshot.
+ * has answered with the resulting snapshot.
  */
 import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
@@ -10,15 +10,11 @@ import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 
 import { CHANNEL, methodOf, type Endpoint, type WorktreeSnapshot } from '../protocol.ts'
 
-export const EMPTY_SNAPSHOT: WorktreeSnapshot = { repos: [], workspaceRepo: {}, syncedAt: 0, syncing: false }
+export const EMPTY_SNAPSHOT: WorktreeSnapshot = { repos: [], workspaceRepo: {}, syncedAt: 0 }
 
 export interface WorktreeActions {
-  /** Reconcile now. */
-  sync(): Promise<void>
-  /** Register one worktree now. */
-  register(path: string): Promise<void>
-  /** Switch automatic registration for a repository. */
-  setRepoAuto(repoKey: string, auto: boolean): Promise<void>
+  /** Reconcile now and answer with the fresh snapshot (the Refresh action). */
+  refresh(): Promise<void>
   /** Set a repository's display name; an empty name restores the derived one. */
   setRepoName(repoKey: string, name: string): Promise<void>
 }
@@ -39,7 +35,6 @@ function isSnapshot(value: unknown): value is WorktreeSnapshot {
   return Array.isArray(candidate.repos)
     && typeof candidate.workspaceRepo === 'object' && candidate.workspaceRepo !== null
     && typeof candidate.syncedAt === 'number'
-    && typeof candidate.syncing === 'boolean'
 }
 
 export function createWorktreeClient(connection: ConnectionHandle, workspaces: IWorkspaces): WorktreeClient {
@@ -67,9 +62,7 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
       },
     },
     actions: {
-      sync: () => call('sync'),
-      register: path => call('register', { path }),
-      setRepoAuto: (repoKey, auto) => call('setRepoAuto', { repoKey, auto }),
+      refresh: () => call('sync'),
       setRepoName: (repoKey, name) => call('setRepoName', { repoKey, name }),
     },
     start() {

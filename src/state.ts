@@ -1,7 +1,6 @@
 /**
- * Plugin-owned durable memory: ignored worktree paths, per-repository
- * automation switches, and the worktree associations and titles the plugin
- * assigned. Stored as one JSON document written atomically (temp file + rename).
+ * Plugin-owned durable memory: ignored worktree paths, repository display
+ * names, and the worktree associations and titles the plugin assigned. Stored as one JSON document written atomically (temp file + rename).
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -10,7 +9,6 @@ import { homedir } from 'node:os'
 export interface PersistedState {
   readonly version: 1
   readonly ignored: readonly string[]
-  readonly repoAuto: Readonly<Record<string, boolean>>
   readonly knownWorktrees: Readonly<Record<string, string>>
   readonly autoTitles: Readonly<Record<string, string>>
   /** Display name per repository key; empty means "derive it from the main worktree". */
@@ -20,7 +18,6 @@ export interface PersistedState {
 export const EMPTY_STATE: PersistedState = {
   version: 1,
   ignored: [],
-  repoAuto: {},
   knownWorktrees: {},
   autoTitles: {},
   repoNames: {},
@@ -43,13 +40,6 @@ function stringRecord(value: unknown): Record<string, string> {
   return out
 }
 
-function booleanRecord(value: unknown): Record<string, boolean> {
-  const out: Record<string, boolean> = {}
-  if (!isRecord(value)) return out
-  for (const [key, entry] of Object.entries(value)) if (typeof entry === 'boolean') out[key] = entry
-  return out
-}
-
 /** Coerce an arbitrary parsed document into a valid state, dropping malformed fields. */
 export function normalizeState(value: unknown): PersistedState {
   if (!isRecord(value)) return EMPTY_STATE
@@ -57,7 +47,6 @@ export function normalizeState(value: unknown): PersistedState {
   return {
     version: 1,
     ignored: [...new Set(ignored)],
-    repoAuto: booleanRecord(value.repoAuto),
     knownWorktrees: stringRecord(value.knownWorktrees),
     autoTitles: stringRecord(value.autoTitles),
     repoNames: stringRecord(value.repoNames),

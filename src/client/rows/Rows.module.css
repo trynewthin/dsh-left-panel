@@ -360,7 +360,7 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* Repository node: the count/sync caption yields to the row actions on hover. */
+/* Repository node: the scan-failure marker yields to the row actions on hover. */
 .repoMeta {
   flex: none;
   font-size: 12px;
@@ -377,12 +377,6 @@
   display: none;
 }
 
-/* Worktree rows sit one level under their repository; the enclosing section
-   (WorkspaceBrowser.module.css .nestedSection) supplies the indent. */
-.nestedRow {
-  position: relative;
-}
-
 .badge {
   flex: none;
   font-size: 10px;
@@ -391,31 +385,6 @@
   border-radius: 4px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-tertiary);
-}
-
-/* A worktree without a Workspace: informational, not selectable. */
-.ghostRow {
-  cursor: default;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.ghostRow:hover {
-  background: transparent;
-}
-
-.ghostRow:hover .folder {
-  display: inline-flex;
-}
-
-.ghostState {
-  flex: none;
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-caption);
-}
-
-.ghostRow .rowActions {
-  gap: 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {

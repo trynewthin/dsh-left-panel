@@ -15,14 +15,13 @@ import clsx from 'clsx'
 import {
   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
   IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
-  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
-  StateDot,
+  IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu,
+  relativeTime, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, RepoSection, SearchResultNode, SessionNode } from '../tree.ts'
-import type { WorktreeInfo } from '../../protocol.ts'
 import css from './Rows.module.css'
 
 /** The standard locale seat, prop-passed from the browser root. */
@@ -141,7 +140,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   ]
   const ownRow = (
     <div
-      className={clsx(css.projectRow, menuOpen && css.menuOpen, nested && css.nestedRow)}
+      className={clsx(css.projectRow, menuOpen && css.menuOpen)}
       role="treeitem"
       aria-expanded={row.expanded}
       onClick={onToggle}
@@ -249,34 +248,28 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * rows beneath it — and its menu drives the plugin's per-repository sync.
  * @param props.section - derived repository section.
  * @param props.onToggle - expand/collapse the repository.
- * @param props.onSync - reconcile this repository's worktrees now.
- * @param props.onSetAuto - switch automatic registration.
+ * @param props.onRefresh - reconcile this repository's worktrees now.
  * @param props.onRename - open the browser-owned rename dialog for this repository.
- * @param props.syncing - a reconcile is in flight.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onSync, onSetAuto, onRename, syncing, home, t }: {
+export function RepoRowItem({ section, onToggle, onRefresh, onRename, home, t }: {
   section: RepoSection
   onToggle: () => void
-  onSync: () => void
-  onSetAuto: (auto: boolean) => void
+  onRefresh: () => void
   onRename: () => void
-  syncing: boolean
   home?: string | undefined
   t: RowTranslate
 }) {
   const { repo } = section
   const [menuOpen, setMenuOpen] = useState(false)
   const active = section.expanded && section.containsCurrent
-  // The tree itself shows how many worktrees there are; this cell speaks only
-  // when something needs attention (a scan failure or a reconcile in flight).
-  const meta = repo.error !== undefined ? '!' : syncing ? t('repo.syncing') : undefined
+  // The tree itself shows how many worktrees there are and reconciliation is
+  // continuous, so this cell speaks only when a scan failed.
   const menuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
-    { id: 'sync', label: t('repo.menu.sync') },
-    { id: 'auto', label: t(repo.auto ? 'repo.menu.autoOff' : 'repo.menu.autoOn') },
+    { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutline16 /> },
   ]
   const ownRow = (
     <div
@@ -294,9 +287,7 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, onRename, sy
       <span className={css.projectText}>
         <span className={css.title}>{repo.name}</span>
       </span>
-      {meta !== undefined && (
-        <span className={clsx(css.repoMeta, repo.error !== undefined && css.repoMetaError)}>{meta}</span>
-      )}
+      {repo.error !== undefined && <span className={clsx(css.repoMeta, css.repoMetaError)}>!</span>}
       <span className={css.rowActions}>
         <Menu
           open={menuOpen}
@@ -305,8 +296,7 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, onRename, sy
           onSelect={(id) => {
             setMenuOpen(false)
             if (id === 'rename') onRename()
-            if (id === 'sync') onSync()
-            if (id === 'auto') onSetAuto(!repo.auto)
+            if (id === 'refresh') onRefresh()
           }}
           portal
           closeOnPointerLeave
@@ -330,65 +320,6 @@ export function RepoRowItem({ section, onToggle, onSync, onSetAuto, onRename, sy
       content={<RepoHoverContent section={section} home={home} t={t} />}
       disabled={menuOpen}
       copyText={repo.mainPath}
-      copyLabel={t('copy')}
-      copiedLabel={t('hover.copied')}
-    />
-  )
-}
-
-/**
- * A worktree git reports that has no Workspace while its repository's
- * automation is off: the row exists only to register it by hand. Worktrees the
- * user removed, or whose directory is gone, render no row at all.
- * @param props.worktree - host worktree facts.
- * @param props.busy - a registration is in flight.
- * @param props.onRegister - register the worktree as a Workspace now.
- * @param props.t - the browser root's locale seat.
- * @returns the row element.
- */
-export function GhostWorktreeItem({ worktree, busy, onRegister, t }: {
-  worktree: WorktreeInfo
-  busy: boolean
-  onRegister: () => void
-  t: RowTranslate
-}) {
-  const detail = worktree.detached
-    ? t('worktree.hover.detached', { head: worktree.head.slice(0, 7) })
-    : t('worktree.hover.branch', { branch: worktree.branch ?? worktree.title })
-  const ownRow = (
-    <div className={clsx(css.projectRow, css.nestedRow, css.ghostRow)} role="treeitem" aria-disabled="true">
-      <span className={clsx(css.slot, css.folder)}>
-        <IconBranchOutline16 />
-      </span>
-      <span className={css.projectText}>
-        <span className={css.title}>{worktree.title}</span>
-      </span>
-      <span className={css.ghostState}>{t('worktree.unregistered')}</span>
-      <span className={css.rowActions}>
-        <button
-          type="button"
-          className={css.iconButton}
-          aria-label={t('worktree.register')}
-          title={t('worktree.register')}
-          disabled={busy}
-          onClick={(e) => { e.stopPropagation(); onRegister() }}
-        >
-          <IconPlusOutline16 />
-        </button>
-      </span>
-    </div>
-  )
-  return (
-    <HoverCard
-      anchor={ownRow}
-      content={(
-        <div className={css.hoverContent}>
-          <div className={css.hoverTitle}>{worktree.title}</div>
-          <div className={css.hoverPath}>{worktree.path}</div>
-          <div className={css.hoverTime}>{detail}</div>
-        </div>
-      )}
-      copyText={worktree.path}
       copyLabel={t('copy')}
       copiedLabel={t('hover.copied')}
     />

@@ -18,10 +18,10 @@ function group(workspaceId: string, label: string, cwd: string, containsCurrent 
   }
 }
 
-function worktree(path: string, title: string, workspaceId: string | null, main = false, ignored = false, exists = true): WorktreeInfo {
+function worktree(path: string, title: string, workspaceId: string | null, main = false): WorktreeInfo {
   return {
     path, head: 'a'.repeat(40), branch: title, detached: false, main, bare: false,
-    locked: false, prunable: false, exists, title, workspaceId, ignored,
+    locked: false, prunable: false, exists: true, title, workspaceId,
   }
 }
 
@@ -30,7 +30,6 @@ function repo(key: string, worktrees: WorktreeInfo[]): RepoInfo {
     key,
     name: key.split('/').slice(-2, -1)[0] ?? key,
     mainPath: worktrees.find(w => w.main)?.path ?? '',
-    auto: true,
     worktrees,
   }
 }
@@ -42,7 +41,7 @@ function snapshot(repos: RepoInfo[]): WorktreeSnapshot {
       if (worktree.workspaceId !== null) workspaceRepo[worktree.workspaceId] = entry.key
     }
   }
-  return { repos, workspaceRepo, syncedAt: 1, syncing: false }
+  return { repos, workspaceRepo, syncedAt: 1 }
 }
 
 test('folds worktree groups under their repository and sorts them main-first', () => {
@@ -61,7 +60,6 @@ test('folds worktree groups under their repository and sorts them main-first', (
   assert.ok(first?.kind === 'repo')
   assert.equal(first.repo.key, '/repo/.git')
   assert.deepEqual(first.groups.map(g => g.label), ['feat/login', 'fix/sidebar'])
-  assert.equal(first.ghosts.length, 0)
   const second = sections[1]
   assert.ok(second?.kind === 'group')
   assert.equal(second.group.label, 'plain')
@@ -83,7 +81,6 @@ test('a repository shows only registered groups: no row is invented from the sna
   const section = sections[0]
   assert.ok(section?.kind === 'repo')
   assert.deepEqual(section.groups.map(g => g.label), ['feat/a'])
-  assert.equal(section.ghosts.length, 0, 'a registered worktree is never a ghost')
 })
 
 test('repo node placement follows its first workspace, not its own order', () => {
@@ -98,25 +95,6 @@ test('repo node placement follows its first workspace, not its own order', () =>
   assert.equal(sections.length, 2)
   assert.equal(sections[0]?.kind, 'group')
   assert.equal(sections[1]?.kind, 'repo')
-})
-
-test('ghosts cover only worktrees the user can still register; ignored and vanished ones are hidden', () => {
-  const snap = snapshot([repo('/repo/.git', [
-    worktree('/repo', 'main', 'ws-main', true),
-    worktree('/wt/registerable', 'registerable', null),
-    worktree('/wt/ignored', 'ignored', null, false, true),
-    worktree('/wt/missing', 'missing', null, false, false, false),
-  ])])
-  const sections = arrangeSections([group('ws-main', 'main', '/repo')], snap, {})
-  const repoSection = sections[0]
-  assert.ok(repoSection?.kind === 'repo')
-  assert.deepEqual(repoSection.ghosts.map(g => g.title), ['registerable'])
-  assert.equal(repoSection.expanded, true)
-
-  const collapsed = arrangeSections([group('ws-main', 'main', '/repo')], snap, { [repoGroupKey('/repo/.git')]: false })
-  const hidden = collapsed[0]
-  assert.ok(hidden?.kind === 'repo')
-  assert.equal(hidden.expanded, false)
 })
 
 test('a repository whose every worktree is gone renders no section at all', () => {

@@ -18,7 +18,7 @@ import type {
 import type {} from '@deepseek-ai/dsh-schedule/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
-import type { RepoInfo, WorktreeInfo, WorktreeSnapshot } from '../protocol.ts'
+import type { RepoInfo, WorktreeSnapshot } from '../protocol.ts'
 import {
   indexSubagentDescendants, type SubagentDescendantSummary,
 } from './subagent-lineage.ts'
@@ -453,7 +453,7 @@ export function deriveSearchResults(
   }
 }
 
-/** A repository node: its worktree Workspace groups plus the worktrees without a Workspace. */
+/** A repository node: its worktree Workspace groups. */
 export interface RepoSection {
   kind: 'repo'
   /** Viewing-store expansion key ({@link repoGroupKey}). */
@@ -464,8 +464,6 @@ export interface RepoSection {
   containsCurrent: boolean
   /** Worktree Workspace groups, main worktree first, then by title. */
   groups: readonly GroupNode[]
-  /** Worktrees git reports that have no Workspace (ignored, not yet registered, or missing). */
-  ghosts: readonly WorktreeInfo[]
 }
 
 /** A Workspace outside every scanned repository, rendered exactly as before. */
@@ -485,21 +483,15 @@ function compareWorktreeGroups(mainPath: string): (a: GroupNode, b: GroupNode) =
   }
 }
 
-function compareGhosts(a: WorktreeInfo, b: WorktreeInfo): number {
-  if (a.main !== b.main) return a.main ? -1 : 1
-  return a.title.localeCompare(b.title)
-}
-
 /**
  * Fold worktree Workspace groups under their repository. A repository node
  * sits where its first Workspace sits in Host order; Workspaces outside any
  * scanned repository keep their own row. Repository nodes default to expanded.
  *
- * Only what the Host actually holds is rendered: a row exists for a registered
- * Workspace (its group) or for a worktree the user can still register (a ghost
- * in a repository whose automation is off). A worktree the user removed, one
- * whose directory is gone, and one git no longer lists produce no row at all —
- * re-registering the directory is what brings it back.
+ * Only what the Host actually holds is rendered: every row is a registered
+ * Workspace's group. A worktree the user removed, one whose directory is gone,
+ * and one git no longer lists produce no row at all — re-registering the
+ * directory is what brings it back.
  * @param groups - derived groups in Host order.
  * @param snapshot - repositories and worktrees as the host last observed them.
  * @param groupExpansion - viewing-store expansion state (repository keys included).
@@ -523,9 +515,6 @@ export function arrangeSections(
       expanded: groupExpansion[key] ?? true,
       containsCurrent: false,
       groups: bucket,
-      ghosts: [...repo.worktrees]
-        .filter(worktree => worktree.workspaceId === null && !worktree.ignored && worktree.exists && !worktree.prunable)
-        .sort(compareGhosts),
     })
     buckets.set(repo.key, bucket)
     return bucket

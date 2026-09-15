@@ -6,6 +6,11 @@
  * Transport: exact Fetch routes on the shared, authenticated `/api` channel
  * (`/api/left-panel/<endpoint>`), speaking the Connection RPC envelope so the
  * browser half can use `connection.rpc.call(CHANNEL, methodOf(endpoint), payload)`.
+ *
+ * The plugin keeps no per-repository switches: registering a repository's
+ * worktrees is its default behaviour, and reconciliation runs on its own
+ * (startup, workspace changes, git filesystem events, a slow poll), so the
+ * browser only asks for a snapshot or for a refresh.
  */
 
 /** Shared Connection channel the plugin's routes live under. */
@@ -17,18 +22,12 @@ export const ENDPOINT_PREFIX = 'left-panel'
 /**
  * Endpoint names; every one resolves to a {@link WorktreeSnapshot}.
  * - `list`: current snapshot without touching git.
- * - `sync`: reconcile now, then answer.
- * - `ignore`: unregister a worktree's Workspace and stop registering it automatically.
- * - `unignore`: allow automatic registration again (an automatic repository registers it at once).
- * - `register`: register one worktree now, clearing any ignore.
- * - `setRepoAuto`: switch automatic registration for one repository.
+ * - `sync`: reconcile now, then answer (the browser's Refresh action).
  * - `setRepoName`: set the repository's display name; an empty name restores the derived one.
  */
-export type Endpoint = 'list' | 'sync' | 'ignore' | 'unignore' | 'register' | 'setRepoAuto' | 'setRepoName'
+export type Endpoint = 'list' | 'sync' | 'setRepoName'
 
-export const ENDPOINTS: readonly Endpoint[] = [
-  'list', 'sync', 'ignore', 'unignore', 'register', 'setRepoAuto', 'setRepoName',
-]
+export const ENDPOINTS: readonly Endpoint[] = ['list', 'sync', 'setRepoName']
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */
 export function methodOf(endpoint: Endpoint): string {
@@ -56,8 +55,6 @@ export interface WorktreeInfo {
   readonly title: string
   /** Registered Workspace id when this worktree currently has one. */
   readonly workspaceId: string | null
-  /** The user removed this worktree's Workspace; the plugin will not register it again until un-ignored. */
-  readonly ignored: boolean
 }
 
 /** One git repository: every registered worktree-root Workspace that shares a common git dir. */
@@ -68,8 +65,6 @@ export interface RepoInfo {
   readonly name: string
   /** Canonical path of the main worktree. */
   readonly mainPath: string
-  /** Automatic register/unregister is enabled for this repository. */
-  readonly auto: boolean
   readonly worktrees: readonly WorktreeInfo[]
   /** Last git failure for this repository, when the scan could not complete. */
   readonly error?: string
@@ -82,11 +77,7 @@ export interface WorktreeSnapshot {
   readonly workspaceRepo: Readonly<Record<string, string>>
   /** Epoch ms of the last completed reconcile; 0 before the first one. */
   readonly syncedAt: number
-  readonly syncing: boolean
 }
 
-export interface IgnoreRequest { readonly path: string }
-export interface SetRepoAutoRequest { readonly repoKey: string; readonly auto: boolean }
 /** Empty `name` restores the derived display name. */
 export interface SetRepoNameRequest { readonly repoKey: string; readonly name: string }
-export interface RegisterRequest { readonly path: string }

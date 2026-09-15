@@ -132,6 +132,8 @@ interface Harness {
   readonly rpc: (endpoint: string, payload?: unknown) => Promise<WorktreeSnapshot>
   /** Send one raw Request to a registered route, bypassing the envelope helper. */
   readonly raw: (path: string, init: RequestInit) => Promise<Response>
+  /** Every route path the service registered. */
+  readonly routePaths: () => string[]
   readonly dispose: () => void
 }
 
@@ -180,6 +182,7 @@ function createHarness(registry: FakeRegistry, stateFile: string): Harness {
     registry,
     service,
     raw,
+    routePaths: () => [...routes.keys()],
     rpc: async (endpoint, payload = {}) => {
       const method = `left-panel/${endpoint}`
       const rpcId = `rpc-${Math.random().toString(16).slice(2)}`
@@ -235,7 +238,6 @@ test('worktree sync end to end against a real repository', async (t) => {
     const [repoInfo] = snapshot.repos
     assert.ok(repoInfo)
     assert.equal(repoInfo.name, 'repo')
-    assert.equal(repoInfo.auto, true)
     assert.deepEqual(repoInfo.worktrees.map(w => [w.title, w.main, w.workspaceId !== null]), [['main', true, true], ['feat/x', false, true]])
     assert.equal(snapshot.workspaceRepo[main.id], repoInfo.key)
     assert.equal(snapshot.workspaceRepo[feat.id], repoInfo.key)
@@ -285,35 +287,14 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.ok(registry.get(main.id), 'main workspace untouched')
   })
 
-  await t.test('a worktree Workspace the user deletes is ignored, not re-registered, and can be un-ignored', async () => {
+  await t.test('a user delete is not re-registered, and adding the directory back resumes management', async () => {
     const feat = await registry.resolveByPath(featPath)
     assert.ok(feat)
     await registry.delete(feat.id)
     await sleep(20)
     await harness.service.syncNow()
-    assert.equal(await registry.resolveByPath(featPath), undefined, 'not re-registered')
-    let snapshot = harness.service.snapshot()
-    const ghost = snapshot.repos[0]?.worktrees.find(w => w.path === featPath)
-    assert.ok(ghost)
-    assert.equal(ghost.ignored, true)
-    assert.equal(ghost.workspaceId, null)
-
-    snapshot = await harness.rpc('unignore', { path: featPath })
-    const restored = await registry.resolveByPath(featPath)
-    assert.ok(restored, 're-registered after un-ignore')
-    assert.equal(snapshot.repos[0]?.worktrees.find(w => w.path === featPath)?.workspaceId, restored.id)
-  })
-
-  await t.test('ignore via RPC unregisters and stops automation; register brings it back', async () => {
-    let snapshot = await harness.rpc('ignore', { path: featPath })
-    assert.equal(await registry.resolveByPath(featPath), undefined)
-    assert.equal(snapshot.repos[0]?.worktrees.find(w => w.path === featPath)?.ignored, true)
-    snapshot = await harness.rpc('register', { path: featPath })
-    assert.ok(await registry.resolveByPath(featPath))
-    assert.equal(snapshot.repos[0]?.worktrees.find(w => w.path === featPath)?.ignored, false)
-  })
-
-  await t.test('putting the directory back lifts the ignore and the plugin manages it again', async () => {
+    assert.equal(await registry.resolveByPath(featPath), undefined, 'not re-registered automatically')
+    assert.equal(harness.service.snapshot().repos[0]?.worktrees.find(w => w.path === featPath)?.workspaceId, null)
     // The user's route back is the ordinary "add workspace" gesture.
     const restored = await registry.create(featPath, 'repo-login')
     await harness.service.syncNow()
@@ -322,23 +303,6 @@ test('worktree sync end to end against a real repository', async (t) => {
     const worktree = harness.service.snapshot().repos[0]?.worktrees.find(w => w.path === featPath)
     assert.ok(worktree)
     assert.equal(worktree.workspaceId, restored.id)
-    assert.equal(worktree.ignored, false)
-  })
-
-  await t.test('automation off lists new worktrees without registering them', async () => {
-    const repoKey = harness.service.snapshot().repos[0]?.key
-    assert.ok(repoKey)
-    await harness.rpc('setRepoAuto', { repoKey, auto: false })
-    const threePath = join(root, 'wt-three')
-    await git(repo, 'worktree', 'add', '-q', '-b', 'three', threePath)
-    const snapshot = await harness.rpc('sync')
-    assert.equal(await registry.resolveByPath(threePath), undefined)
-    const three = snapshot.repos[0]?.worktrees.find(w => w.path === threePath)
-    assert.ok(three)
-    assert.equal(three.workspaceId, null)
-    assert.equal(three.ignored, false)
-    await harness.rpc('register', { path: threePath })
-    assert.equal((await registry.resolveByPath(threePath))?.title, 'three')
   })
 
   await t.test('renames a repository without touching DSH data, and restores the derived default', async () => {
@@ -355,9 +319,12 @@ test('worktree sync end to end against a real repository', async (t) => {
     await assert.rejects(harness.rpc('setRepoName', { repoKey }), /bad-request/)
   })
 
-  await t.test('rejects paths outside the scanned worktrees and unknown endpoints', async () => {
-    await assert.rejects(harness.rpc('register', { path: root }), /unknown-worktree/)
-    await assert.rejects(harness.rpc('ignore', {}), /bad-request/)
+  await t.test('exposes exactly the endpoints the browser half uses', async () => {
+    // The plugin has no per-repository switches and no manual registration:
+    // reconciliation is continuous and the browser only reads or refreshes.
+    assert.deepEqual(harness.routePaths().sort(), [
+      '/api/left-panel/list', '/api/left-panel/setRepoName', '/api/left-panel/sync',
+    ])
     assert.equal(harness.service.snapshot().repos.length, 1)
   })
 

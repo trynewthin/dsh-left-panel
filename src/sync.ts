@@ -4,7 +4,7 @@
  * delete, or retitle. No I/O lives here so every rule is unit-testable.
  *
  * Rules:
- * - a present, unregistered, un-ignored worktree of an auto repository is created;
+ * - a present, unregistered, un-ignored worktree is created;
  * - a registered linked worktree that git no longer lists, or whose directory
  *   is gone, is deleted once it has been gone for {@link REMOVAL_GRACE_MS};
  * - the main worktree is never deleted automatically;
@@ -41,8 +41,6 @@ export interface ScannedRepo {
 
 export interface SyncMemory {
   readonly ignored: ReadonlySet<string>
-  /** Missing entries default to automatic. */
-  readonly repoAuto: ReadonlyMap<string, boolean>
   /** Worktree path → repository key, for worktrees the plugin has seen registered. */
   readonly knownWorktrees: ReadonlyMap<string, string>
   /** Worktree path → the title the plugin last assigned to its Workspace. */
@@ -99,7 +97,6 @@ export function planSync(
   }
 
   for (const repo of repos) {
-    const auto = memory.repoAuto.get(repo.key) ?? true
     const main = repo.worktrees.find(worktree => worktree.main)
     const mainWorkspaceId = main === undefined ? undefined : byPath.get(main.path)?.id
     const repoPaths = new Set<string>()
@@ -113,7 +110,7 @@ export function planSync(
       if (registered !== undefined) {
         knownWorktrees.set(worktree.path, repo.key)
         if (!present) {
-          if (!worktree.main && auto) consider(worktree.path, repo.key, registered.id, 'directory-missing')
+          if (!worktree.main) consider(worktree.path, repo.key, registered.id, 'directory-missing')
           continue
         }
         const title = worktreeTitle(worktree)
@@ -123,7 +120,7 @@ export function planSync(
         }
         continue
       }
-      if (!present || !auto || memory.ignored.has(worktree.path)) continue
+      if (!present || memory.ignored.has(worktree.path)) continue
       actions.push({ type: 'create', repoKey: repo.key, path: worktree.path, title: worktreeTitle(worktree), mainWorkspaceId })
     }
 
@@ -134,7 +131,7 @@ export function planSync(
         knownWorktrees.delete(path)
         continue
       }
-      if (path === repo.mainPath || !auto) continue
+      if (path === repo.mainPath) continue
       consider(path, repo.key, registered.id, 'worktree-gone')
     }
   }

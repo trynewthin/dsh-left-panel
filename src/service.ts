@@ -64,12 +64,6 @@ function stringField(payload: unknown, key: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-function booleanField(payload: unknown, key: string): boolean | undefined {
-  if (typeof payload !== 'object' || payload === null) return undefined
-  const value = (payload as Record<string, unknown>)[key]
-  return typeof value === 'boolean' ? value : undefined
-}
-
 function sameState(a: PersistedState, b: PersistedState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
@@ -103,7 +97,6 @@ export class WorktreeSyncService {
   private repos: readonly ScannedRepo[] = []
   private failedRepos: ReadonlyMap<string, FailedRepo> = new Map()
   private pendingRemoval: ReadonlyMap<string, number> = new Map()
-  private syncing = false
   private syncedAt = 0
   private dirty = false
   private running: Promise<void> | undefined
@@ -174,7 +167,6 @@ export class WorktreeSyncService {
   snapshot(): WorktreeSnapshot {
     const state = this.store.current
     const byPath = new Map(this.registry.map(workspace => [workspace.path, workspace]))
-    const ignored = this.ignoredPaths()
     const workspaceRepo: Record<string, string> = {}
     const repos: RepoInfo[] = this.repos.map((repo) => {
       const worktrees: WorktreeInfo[] = []
@@ -194,16 +186,12 @@ export class WorktreeSyncService {
           exists: worktree.exists,
           title: worktreeTitle(worktree),
           workspaceId,
-          // A registered worktree is never "ignored": the user putting the
-          // directory back is what lifts the tombstone.
-          ignored: workspaceId === null && ignored.has(worktree.path),
         })
       }
       return {
         key: repo.key,
         name: state.repoNames[repo.key] ?? (basename(repo.mainPath) || repo.mainPath),
         mainPath: repo.mainPath,
-        auto: state.repoAuto[repo.key] ?? true,
         worktrees,
       }
     })
@@ -212,12 +200,11 @@ export class WorktreeSyncService {
         key,
         name: state.repoNames[key] ?? (basename(failed.mainPath) || failed.mainPath),
         mainPath: failed.mainPath,
-        auto: state.repoAuto[key] ?? true,
         worktrees: [],
         error: failed.error,
       })
     }
-    return { repos, workspaceRepo, syncedAt: this.syncedAt, syncing: this.syncing }
+    return { repos, workspaceRepo, syncedAt: this.syncedAt }
   }
 
   /** Schedule a reconcile shortly; repeated requests collapse into one run. */
@@ -243,13 +230,10 @@ export class WorktreeSyncService {
     this.running = (async () => {
       while (this.dirty && !this.disposed) {
         this.dirty = false
-        this.syncing = true
         try {
           await this.reconcileOnce()
         } catch (error) {
           this.ctx.logger.warn(`left-panel: reconcile failed: ${String(error)}`)
-        } finally {
-          this.syncing = false
         }
       }
     })().finally(() => { this.running = undefined })
@@ -266,7 +250,6 @@ export class WorktreeSyncService {
     const state = this.store.current
     const memory: SyncMemory = {
       ignored: this.ignoredPaths(),
-      repoAuto: new Map(Object.entries(state.repoAuto)),
       knownWorktrees: new Map(Object.entries(state.knownWorktrees)),
       autoTitles: new Map(Object.entries(state.autoTitles)),
       pendingRemoval: this.pendingRemoval,
@@ -489,14 +472,6 @@ export class WorktreeSyncService {
     return this.repos.some(repo => repo.worktrees.some(worktree => worktree.path === path))
   }
 
-  private findWorktree(path: string): { repo: ScannedRepo; worktree: ScannedWorktree } | undefined {
-    for (const repo of this.repos) {
-      const worktree = repo.worktrees.find(candidate => candidate.path === path && !candidate.bare)
-      if (worktree !== undefined) return { repo, worktree }
-    }
-    return undefined
-  }
-
   private async handle(endpoint: string, payload: unknown): Promise<ConnectionRpcResult<unknown>> {
     try {
       switch (endpoint) {
@@ -505,58 +480,6 @@ export class WorktreeSyncService {
         case 'sync':
           await this.syncNow()
           return ok(this.snapshot())
-        case 'ignore':
-        case 'unignore':
-        case 'register': {
-          const raw = stringField(payload, 'path')
-          if (raw === undefined) return fail('left-panel/bad-request', `${endpoint} requires a path`)
-          const found = this.findWorktree(await canonical(raw))
-          if (found === undefined) return fail('left-panel/unknown-worktree', `${raw} is not a worktree of a registered repository`, { path: raw })
-          const { worktree } = found
-          if (endpoint === 'ignore') {
-            this.ignoring.add(worktree.path)
-            await this.store.update(state => state.ignored.includes(worktree.path)
-              ? state
-              : { ...state, ignored: [...state.ignored, worktree.path] })
-            const registered = this.registry.find(workspace => workspace.path === worktree.path)
-            if (registered !== undefined) {
-              this.rememberSelfDelete(registered.id)
-              await this.ctx.workspaceRegistry.delete(registered.id as WorkspaceId)
-            }
-          } else {
-            this.ignoring.delete(worktree.path)
-            await this.store.update(state => state.ignored.includes(worktree.path)
-              ? { ...state, ignored: state.ignored.filter(path => path !== worktree.path) }
-              : state)
-            if (endpoint === 'register') {
-              if (!worktree.exists) return fail('left-panel/missing-directory', `${worktree.path} does not exist`, { path: worktree.path })
-              const title = worktreeTitle(worktree)
-              const workspace = await this.ctx.workspaceRegistry.create(worktree.path, title)
-              await this.store.update(state => ({
-                ...state,
-                knownWorktrees: { ...state.knownWorktrees, [worktree.path]: found.repo.key },
-                autoTitles: { ...state.autoTitles, [worktree.path]: title },
-              }))
-              const main = found.repo.worktrees.find(candidate => candidate.main)
-              const mainWorkspaceId = main === undefined ? undefined : this.registry.find(entry => entry.path === main.path)?.id
-              await this.placeAfterRepo(workspace.id, found.repo.key, mainWorkspaceId)
-              await this.adoptExistingSessions(workspace, (await this.sessionsByDirectory()).get(worktree.path) ?? [])
-            }
-          }
-          await this.syncNow()
-          return ok(this.snapshot())
-        }
-        case 'setRepoAuto': {
-          const repoKey = stringField(payload, 'repoKey')
-          const auto = booleanField(payload, 'auto')
-          if (repoKey === undefined || auto === undefined) return fail('left-panel/bad-request', 'setRepoAuto requires repoKey and auto')
-          if (!this.repos.some(repo => repo.key === repoKey) && !this.failedRepos.has(repoKey)) {
-            return fail('left-panel/unknown-repository', `${repoKey} is not a scanned repository`, { repoKey })
-          }
-          await this.store.update(state => ({ ...state, repoAuto: { ...state.repoAuto, [repoKey]: auto } }))
-          await this.syncNow()
-          return ok(this.snapshot())
-        }
         case 'setRepoName': {
           const repoKey = stringField(payload, 'repoKey')
           if (repoKey === undefined) return fail('left-panel/bad-request', 'setRepoName requires repoKey')

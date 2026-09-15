@@ -23,7 +23,6 @@ function repo(worktrees: ScannedWorktree[]): ScannedRepo {
 function memory(overrides: Partial<SyncMemory> = {}): SyncMemory {
   return {
     ignored: new Set(),
-    repoAuto: new Map(),
     knownWorktrees: new Map(),
     autoTitles: new Map(),
     pendingRemoval: new Map(),
@@ -44,18 +43,15 @@ test('creates a Workspace for each present unregistered worktree with the branch
   ])
 })
 
-test('skips ignored, bare and missing worktrees and repositories with automation off', () => {
+test('skips ignored, bare and missing worktrees', () => {
   const scanned = repo([
     worktree('/repo', { main: true }),
     worktree('/wt/ignored'),
     worktree('/bare.git', { bare: true }),
     worktree('/wt/missing', { exists: false }),
   ])
-  const ignoredPlan = planSync([MAIN], [scanned], memory({ ignored: new Set(['/wt/ignored']) }), NOW)
-  assert.deepEqual(ignoredPlan.actions, [])
-  const manualPlan = planSync([MAIN], [repo([worktree('/repo', { main: true }), worktree('/wt/new')])],
-    memory({ repoAuto: new Map([[REPO, false]]) }), NOW)
-  assert.deepEqual(manualPlan.actions, [])
+  const plan = planSync([MAIN], [scanned], memory({ ignored: new Set(['/wt/ignored']) }), NOW)
+  assert.deepEqual(plan.actions, [])
 })
 
 test('retitles a worktree Workspace only while it still carries the plugin-assigned title', () => {
