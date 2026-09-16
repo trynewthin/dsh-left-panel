@@ -32,3 +32,21 @@ export function workspacePickerEntries(
   }
   return entries
 }
+
+/** Keep project headings while hiding nested worktrees of folded projects. */
+export function visibleWorkspacePickerEntries(
+  entries: readonly WorkspacePickerEntry[],
+  expandedProjectIds: ReadonlySet<string>,
+): WorkspacePickerEntry[] {
+  let projectExpanded = true
+  const visible: WorkspacePickerEntry[] = []
+  for (const entry of entries) {
+    if (entry.kind === 'project') {
+      projectExpanded = expandedProjectIds.has(entry.id)
+      visible.push(entry)
+      continue
+    }
+    if (!entry.nested || projectExpanded) visible.push(entry)
+  }
+  return visible
+}

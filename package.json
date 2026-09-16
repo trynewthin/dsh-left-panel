@@ -1,7 +1,7 @@
 {
   "name": "dsh-left-panel",
-  "version": "0.1.5",
-  "description": "Git worktree-aware workspace browser for the DeepSeek Harness Web sidebar: repositories group their checked-out worktrees, and worktree workspaces are registered and unregistered automatically.",
+  "version": "0.2.0",
+  "description": "Git worktree-aware workspace browser for DeepSeek Harness: project sections, repository-grouped worktrees, and automatic workspace synchronization.",
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",

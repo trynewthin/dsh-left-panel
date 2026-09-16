@@ -10,7 +10,7 @@
  * except workspace Rename/Delete and session Rename/Fork/Archive; the session
  * and workspace hover cards are suppressed while a menu is open.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
@@ -87,6 +87,71 @@ export interface RowDragProps {
   hover: (half: 'before' | 'after') => void
   drop: (half: 'before' | 'after') => void
   end: () => void
+}
+
+/** Visual project-section heading. Actions appear only while the heading is hovered. */
+export function ProjectAreaHeader({ name, expanded, active, onToggle, onRename, onDissolve, onDragOver, onDrop, t }: {
+  name: string
+  expanded: boolean
+  active: boolean
+  onToggle: () => void
+  onRename?: (() => void) | undefined
+  onDissolve?: (() => void) | undefined
+  onDragOver?: ((event: DragEvent<HTMLDivElement>) => void) | undefined
+  onDrop?: ((event: DragEvent<HTMLDivElement>) => void) | undefined
+  t: RowTranslate
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  return (
+    <div
+      className={clsx(css.areaHeader, active && css.areaHeaderActive, menuOpen && css.menuOpen)}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onToggle()
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <span className={css.areaName}>{name}</span>
+      <span className={css.areaChevron}>
+        <IconTriangleRightFill14 className={clsx(css.arrow, expanded && css.arrowOpen)} />
+      </span>
+      {(onRename !== undefined || onDissolve !== undefined) && (
+        <span className={css.areaActions}>
+          <Menu
+            open={menuOpen}
+            onClose={() => { setMenuOpen(false) }}
+            items={[
+              ...(onRename === undefined ? [] : [{ id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> }]),
+              ...(onDissolve === undefined ? [] : [{ id: 'dissolve', label: t('area.dissolve'), icon: <IconTrashOutline16 />, danger: true }]),
+            ]}
+            onSelect={(id) => {
+              setMenuOpen(false)
+              if (id === 'rename') onRename?.()
+              if (id === 'dissolve') onDissolve?.()
+            }}
+            portal
+            closeOnPointerLeave
+            anchor={(
+              <button
+                type="button"
+                className={css.areaAction}
+                aria-label={t('area.actions.aria', { name })}
+                onClick={(event) => { event.stopPropagation(); setMenuOpen(value => !value) }}
+              >
+                <IconEllipsisOutline16 />
+              </button>
+            )}
+          />
+        </span>
+      )}
+    </div>
+  )
 }
 
 /** Drag lifecycle owned by a workspace row; its enclosing group owns hit testing. */

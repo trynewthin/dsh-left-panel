@@ -11,6 +11,79 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.areaHeader {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin-top: 10px;
+  padding: 0 8px 0 3px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.areaHeader:first-child { margin-top: 0; }
+
+.areaHeaderActive {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.areaName {
+  min-width: 0;
+  max-width: calc(100% - 48px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.areaChevron {
+  display: none;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+  margin-left: 4px;
+}
+
+.areaHeader:hover .areaChevron,
+.areaHeader.menuOpen .areaChevron { display: inline-flex; }
+
+.areaActions {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.areaHeader:hover .areaActions,
+.areaHeader.menuOpen .areaActions { display: inline-flex; }
+
+.areaAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.areaAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
 .projectRow:hover,
 .sessionRow:hover {
   background: var(--dsw-alias-interactive-bg-hover);

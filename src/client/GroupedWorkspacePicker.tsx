@@ -1,15 +1,17 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
-  Button, IconBranchOutline16, IconFolderClose16, IconPlusOutline16, Menu, Modal,
+  Button, IconBranchOutline16, IconFolderClose16, IconPlusOutline16,
+  IconTriangleRightFill14, Menu, Modal,
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
 import type { GroupedWorkspacePickerProps } from './contract/slots.ts'
-import { workspacePickerEntries } from './workspace-picker-tree.ts'
+import { visibleWorkspacePickerEntries, workspacePickerEntries } from './workspace-picker-tree.ts'
 import css from './GroupedWorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
+const TOGGLE_PROJECT = '::toggle-project:'
 
 /** Repository-aware replacement for the New Session Workspace picker. */
 export function GroupedWorkspacePicker({
@@ -21,11 +23,34 @@ export function GroupedWorkspacePicker({
   const snapshot = useWorktrees(state => state)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set())
   const getAnchorRect = useCallback(() => anchorRef?.current?.getBoundingClientRect() ?? null, [anchorRef])
+  const allEntries = workspacePickerEntries(workspaces, snapshot)
+  const selectedRepoKey = selectedId === undefined ? undefined : snapshot.workspaceRepo[selectedId as string]
+  const selectedProjectId = selectedRepoKey === undefined ? undefined : `repo:${selectedRepoKey}`
+  useEffect(() => {
+    if (!open || selectedProjectId === undefined) return
+    setExpandedProjects((current) => {
+      if (current.has(selectedProjectId)) return current
+      return new Set([...current, selectedProjectId])
+    })
+  }, [open, selectedProjectId])
+  const visibleEntries = visibleWorkspacePickerEntries(allEntries, expandedProjects)
   const entries: MenuEntry[] = snapshot.syncedAt === 0
     ? [{ type: 'label', id: '::loading', text: t('picker.loading') }]
-    : workspacePickerEntries(workspaces, snapshot).map((entry) => {
-    if (entry.kind === 'project') return { type: 'label', id: entry.id, text: entry.name }
+    : visibleEntries.map((entry) => {
+    if (entry.kind === 'project') {
+      const expanded = expandedProjects.has(entry.id)
+      return {
+        id: `${TOGGLE_PROJECT}${entry.id}`,
+        label: (
+          <span className={css.projectLabel}>
+            <span className={css.projectName}>{entry.name}</span>
+            <IconTriangleRightFill14 className={expanded ? css.projectArrowExpanded : css.projectArrow} />
+          </span>
+        ),
+      }
+    }
     return {
       id: entry.workspace.workspaceId as string,
       label: entry.nested
@@ -61,7 +86,15 @@ export function GroupedWorkspacePicker({
         {...entries.length === 0 ? {} : { footer: addEntries }}
         selectedId={selectedId}
         onSelect={(id) => {
-          if (id === ADD_WORKSPACE) chooseDirectory()
+          if (id.startsWith(TOGGLE_PROJECT)) {
+            const projectId = id.slice(TOGGLE_PROJECT.length)
+            setExpandedProjects((current) => {
+              const next = new Set(current)
+              if (next.has(projectId)) next.delete(projectId)
+              else next.add(projectId)
+              return next
+            })
+          } else if (id === ADD_WORKSPACE) chooseDirectory()
           else onPick(id as WorkspaceId)
         }}
         onClose={onClose}

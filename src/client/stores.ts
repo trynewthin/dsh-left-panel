@@ -20,6 +20,14 @@ export type SessionGroupBy = 'workspace' | 'flat'
 /** Session order: user-arranged only, or user-arranged plus activity promotion. */
 export type SessionOrderBy = 'manual' | 'updated'
 
+/** One plugin-owned visual bucket for repository nodes. */
+export interface ProjectArea {
+  id: string
+  name: string
+  /** Repository keys assigned to this area. A repository belongs to at most one area. */
+  repoKeys: string[]
+}
+
 /** Workspace browser viewing state persisted across surface remounts and reloads. */
 type WorkspaceViewState = {
   groupBy: SessionGroupBy
@@ -30,6 +38,8 @@ type WorkspaceViewState = {
   sessionOrderByAccount: Record<string, string[]>
   /** Last observed update timestamps per order account for one-time promotion events. */
   sessionUpdatedAtByAccount: Record<string, Record<string, number>>
+  /** Optional visual grouping layered above repository nodes. */
+  projectAreas: ProjectArea[]
 }
 
 /**
@@ -48,6 +58,10 @@ type WorkspaceViewActions = {
     updatedAt: Record<string, number>,
   ) => void
   setSessionOrder: (draft: WorkspaceViewState, accountKey: string, order: string[]) => void
+  createProjectArea: (draft: WorkspaceViewState, id: string, name: string) => void
+  renameProjectArea: (draft: WorkspaceViewState, id: string, name: string) => void
+  dissolveProjectArea: (draft: WorkspaceViewState, id: string) => void
+  setRepoProjectArea: (draft: WorkspaceViewState, repoKey: string, areaId: string | null) => void
 }
 
 /**
@@ -62,6 +76,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       groupExpansion: {},
       sessionOrderByAccount: {},
       sessionUpdatedAtByAccount: {},
+      projectAreas: [],
     }),
     persist: 'dsh-left-panel.workspace.view.v1',
     actions: {
@@ -86,6 +101,25 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       },
       setSessionOrder: (d, accountKey: string, order: string[]) => {
         d.sessionOrderByAccount[accountKey] = order
+      },
+      createProjectArea: (d, id: string, name: string) => {
+        d.projectAreas ??= []
+        if (d.projectAreas.some(area => area.id === id)) return
+        d.projectAreas.push({ id, name, repoKeys: [] })
+      },
+      renameProjectArea: (d, id: string, name: string) => {
+        const area = d.projectAreas?.find(candidate => candidate.id === id)
+        if (area !== undefined) area.name = name
+      },
+      dissolveProjectArea: (d, id: string) => {
+        d.projectAreas = (d.projectAreas ?? []).filter(area => area.id !== id)
+      },
+      setRepoProjectArea: (d, repoKey: string, areaId: string | null) => {
+        d.projectAreas ??= []
+        for (const area of d.projectAreas) area.repoKeys = area.repoKeys.filter(key => key !== repoKey)
+        if (areaId === null) return
+        const target = d.projectAreas.find(area => area.id === areaId)
+        if (target !== undefined) target.repoKeys.push(repoKey)
       },
     },
   })

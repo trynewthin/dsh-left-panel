@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16,
-  IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
+  IconPlusOutline16, IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -31,8 +31,8 @@ import {
   arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, planWorkspaceMove,
   repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
 } from '../tree.ts'
-import { ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
-import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
+import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { FLAT_SESSION_ORDER_KEY, type ProjectArea } from '../stores.ts'
 import type { WorktreeSnapshot } from '../../protocol.ts'
 import css from './WorkspaceBrowser.module.css'
 
@@ -47,6 +47,11 @@ const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_MAX_CODE_UNITS = 500
 /** Session rows visible per Workspace before the local overflow control. */
 const COLLAPSED_SESSION_LIMIT = 5
+const DEFAULT_PROJECT_AREA_KEY = 'project-area:default'
+
+function projectAreaExpansionKey(id: string): string {
+  return `project-area:${id}`
+}
 
 /** Fold one Workspace without charging its provisional New Session against the ordinary-row limit. */
 function collapsedSessionRows(sessions: readonly SessionNode[]): {
@@ -232,6 +237,12 @@ interface WorkspaceDragState {
   ids: readonly string[]
   /** Repository boundary for a nested worktree drag; absent for top-level section drags. */
   repoKey?: string | undefined
+  /** Repository identity for a top-level project-node drag. */
+  projectKey?: string | undefined
+  /** Area the top-level project occupied when dragging began; null is the default area. */
+  sourceAreaId?: string | null | undefined
+  /** Area header currently accepting this project; undefined means none. */
+  overAreaId?: string | null | undefined
   /** Entire target section, so dropping after a repository clears all of its worktrees. */
   over: { ids: readonly string[]; half: 'before' | 'after' } | null
 }
@@ -272,6 +283,11 @@ type SessionTreeProps = Pick<
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned rename dialog for a repository node. */
   onRepoRenameRequest: (repoKey: string, currentName: string) => void
+  /** Plugin-owned project sections and their mutations. */
+  projectAreas: readonly ProjectArea[]
+  onProjectAreaRenameRequest: (areaId: string, currentName: string) => void
+  onProjectAreaDissolve: (areaId: string) => void
+  onRepoProjectAreaChange: (repoKey: string, areaId: string | null) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned session rename dialog. */
@@ -295,6 +311,7 @@ function SessionTree({
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, snapshot, worktrees,
+  projectAreas, onProjectAreaRenameRequest, onProjectAreaDissolve, onRepoProjectAreaChange,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
@@ -465,6 +482,12 @@ function SessionTree({
       }
     })().catch((reason: unknown) => { console.warn('workspace reorder rejected:', reason) })
   }
+  const commitProjectArea = (activeDrag: WorkspaceDragState, areaId: string | null): void => {
+    if (workspaceDropCommitted.current || activeDrag.projectKey === undefined) return
+    workspaceDropCommitted.current = true
+    setWorkspaceDrag(null)
+    if (activeDrag.sourceAreaId !== areaId) onRepoProjectAreaChange(activeDrag.projectKey, areaId)
+  }
   /** One Workspace group: header row + expanded top-level session rows. */
   const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
     const workspaceId = group.workspaceId
@@ -476,7 +499,11 @@ function SessionTree({
     const workspaceDragProps = workspaceId === undefined ? undefined : {
       start: () => {
         workspaceDropCommitted.current = false
-        setWorkspaceDrag({ ids: [workspaceId as string], ...(nested ? { repoKey } : {}), over: null })
+        setWorkspaceDrag({
+          ids: [workspaceId as string],
+          ...(nested ? { repoKey } : { sourceAreaId: null }),
+          over: null,
+        })
       },
       end: () => {
         if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
@@ -619,6 +646,126 @@ function SessionTree({
       </div>
     )
   }
+  const areaByRepo = new Map<string, string>()
+  for (const area of projectAreas) {
+    for (const repoKey of area.repoKeys) if (!areaByRepo.has(repoKey)) areaByRepo.set(repoKey, area.id)
+  }
+  const sectionsByArea = new Map(projectAreas.map(area => [area.id, [] as TreeSection[]]))
+  const defaultSections: TreeSection[] = []
+  for (const section of sections) {
+    if (section.kind !== 'repo') {
+      defaultSections.push(section)
+      continue
+    }
+    const areaId = areaByRepo.get(section.repo.key)
+    const bucket = areaId === undefined ? undefined : sectionsByArea.get(areaId)
+    if (bucket === undefined) defaultSections.push(section)
+    else bucket.push(section)
+  }
+  const renderTopSection = (section: TreeSection, areaId: string | null) => {
+    if (section.kind === 'group') return renderGroup(section.group, false)
+    // The node is reordered by moving its Workspaces as one block, so the
+    // durable Host order still reads sensibly outside this plugin.
+    const anchorId = section.workspaceIds[0]
+    const sectionMarker = workspaceDrag?.repoKey === undefined
+      && workspaceDrag?.sourceAreaId === areaId
+      && anchorId !== undefined && workspaceDrag?.over?.ids.includes(anchorId)
+      ? workspaceDrag.over.half
+      : null
+    const nodeDrag = anchorId === undefined ? undefined : {
+      start: () => {
+        workspaceDropCommitted.current = false
+        setWorkspaceDrag({
+          ids: section.workspaceIds,
+          projectKey: section.repo.key,
+          sourceAreaId: areaId,
+          over: null,
+        })
+      },
+      end: () => {
+        if (workspaceDrag?.overAreaId !== undefined) {
+          commitProjectArea(workspaceDrag, workspaceDrag.overAreaId)
+        } else if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
+          commitWorkspaceDrag(workspaceDrag, workspaceDrag.over)
+        } else {
+          setWorkspaceDrag(null)
+        }
+        workspaceDropCommitted.current = false
+      },
+    }
+    const acceptsOrder = workspaceDrag !== null && workspaceDrag.repoKey === undefined
+      && workspaceDrag.sourceAreaId === areaId && anchorId !== undefined
+    return (
+      <div
+        key={section.key}
+        className={clsx(
+          css.groupSection,
+          sectionMarker === 'before' && css.workspaceDropBefore,
+          sectionMarker === 'after' && css.workspaceDropAfter,
+        )}
+        onDragOver={!acceptsOrder
+          ? undefined
+          : (e) => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            const half = workspaceGroupHalf(e)
+            setWorkspaceDrag(active => (active === null ? active : {
+              ...active,
+              overAreaId: undefined,
+              over: { ids: section.workspaceIds, half },
+            }))
+          }}
+        onDrop={!acceptsOrder
+          ? undefined
+          : (e) => {
+            e.preventDefault()
+            if (workspaceDrag !== null) {
+              commitWorkspaceDrag(workspaceDrag, { ids: section.workspaceIds, half: workspaceGroupHalf(e) })
+            }
+          }}
+      >
+        <RepoRowItem
+          section={section}
+          home={home}
+          t={t}
+          drag={nodeDrag}
+          onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
+          onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
+          onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
+        />
+        {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
+      </div>
+    )
+  }
+  const renderAreaHeader = (area: ProjectArea | null) => {
+    const areaId = area?.id ?? null
+    const expansionKey = area === null ? DEFAULT_PROJECT_AREA_KEY : projectAreaExpansionKey(area.id)
+    const expanded = groupExpansion[expansionKey] ?? true
+    const canAccept = workspaceDrag?.projectKey !== undefined && workspaceDrag.sourceAreaId !== areaId
+    return (
+      <ProjectAreaHeader
+        key={area?.id ?? '__default_project_area__'}
+        name={area?.name ?? t('area.default')}
+        expanded={expanded}
+        active={workspaceDrag?.overAreaId === areaId}
+        onToggle={() => { setGroupExpanded(expansionKey, !expanded) }}
+        t={t}
+        {...area === null ? {} : {
+          onRename: () => { onProjectAreaRenameRequest(area.id, area.name) },
+          onDissolve: () => { onProjectAreaDissolve(area.id) },
+        }}
+        onDragOver={!canAccept ? undefined : (e) => {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          setWorkspaceDrag(active => active === null ? active : { ...active, over: null, overAreaId: areaId })
+        }}
+        onDrop={!canAccept ? undefined : (e) => {
+          e.preventDefault()
+          if (workspaceDrag !== null) commitProjectArea(workspaceDrag, areaId)
+        }}
+      />
+    )
+  }
   const firstRowId = (() => {
     const first = sections[0]
     if (first === undefined) return undefined
@@ -640,70 +787,24 @@ function SessionTree({
         {groups.length === 0 && (
           <div className={css.empty}>{t('empty.none')}</div>
         )}
-        {sections.map((section) => {
-          if (section.kind === 'group') return renderGroup(section.group, false)
-          // The node is reordered by moving its Workspaces as one block, so the
-          // durable Host order still reads sensibly outside this plugin.
-          const anchorId = section.workspaceIds[0]
-          const sectionMarker = workspaceDrag?.repoKey === undefined
-            && anchorId !== undefined && workspaceDrag?.over?.ids.includes(anchorId)
-            ? workspaceDrag.over.half
-            : null
-          const nodeDrag = anchorId === undefined ? undefined : {
-            start: () => {
-              workspaceDropCommitted.current = false
-              setWorkspaceDrag({ ids: section.workspaceIds, over: null })
-            },
-            end: () => {
-              if (workspaceDrag?.over !== null && workspaceDrag?.over !== undefined) {
-                commitWorkspaceDrag(workspaceDrag, workspaceDrag.over)
-              } else {
-                setWorkspaceDrag(null)
-              }
-              workspaceDropCommitted.current = false
-            },
-          }
-          return (
-            <div
-              key={section.key}
-              className={clsx(
-                css.groupSection,
-                sectionMarker === 'before' && css.workspaceDropBefore,
-                sectionMarker === 'after' && css.workspaceDropAfter,
-              )}
-              onDragOver={workspaceDrag === null || workspaceDrag.repoKey !== undefined || anchorId === undefined
-                ? undefined
-                : (e) => {
-                  e.preventDefault()
-                  e.dataTransfer.dropEffect = 'move'
-                  // React clears currentTarget after the handler returns. Read
-                  // the geometry before the state updater is allowed to run.
-                  const half = workspaceGroupHalf(e)
-                  setWorkspaceDrag(active => (active === null ? active : {
-                    ...active,
-                    over: { ids: section.workspaceIds, half },
-                  }))
-                }}
-              onDrop={workspaceDrag === null || workspaceDrag.repoKey !== undefined || anchorId === undefined
-                ? undefined
-                : (e) => {
-                  e.preventDefault()
-                  commitWorkspaceDrag(workspaceDrag, { ids: section.workspaceIds, half: workspaceGroupHalf(e) })
-                }}
-            >
-              <RepoRowItem
-                section={section}
-                home={home}
-                t={t}
-                drag={nodeDrag}
-                onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
-                onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
-                onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
-              />
-              {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
-            </div>
-          )
-        })}
+        {projectAreas.length === 0
+          ? defaultSections.map(section => renderTopSection(section, null))
+          : (
+            <>
+              {projectAreas.map(area => (
+                <div key={area.id} className={css.projectArea}>
+                  {renderAreaHeader(area)}
+                  {(groupExpansion[projectAreaExpansionKey(area.id)] ?? true)
+                    && (sectionsByArea.get(area.id) ?? []).map(section => renderTopSection(section, area.id))}
+                </div>
+              ))}
+              <div className={css.projectArea}>
+                {renderAreaHeader(null)}
+                {(groupExpansion[DEFAULT_PROJECT_AREA_KEY] ?? true)
+                  && defaultSections.map(section => renderTopSection(section, null))}
+              </div>
+            </>
+          )}
       </div>
       <span className={css.fade} />
     </div>
@@ -967,6 +1068,8 @@ export function WorkspaceBrowser({
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
+  // `?? []` migrates installations whose persisted view predates project sections.
+  const projectAreas = useStore(s => s.projectAreas ?? [])
   const currentBlankSessionId = useSessions((state) => {
     const current = state.current
     return current !== undefined && state.byId[current]?.blank === true ? current : undefined
@@ -1000,8 +1103,10 @@ export function WorkspaceBrowser({
       FLAT_SESSION_ORDER_KEY,
       ...workspaces.map(workspace => workspace.workspaceId as string),
       ...snapshot.repos.map(repo => repoGroupKey(repo.key)),
+      DEFAULT_PROJECT_AREA_KEY,
+      ...projectAreas.map(area => projectAreaExpansionKey(area.id)),
     ])
-  }, [actions.retainAccountKeys, workspacePhase, workspaces, snapshot.repos])
+  }, [actions.retainAccountKeys, workspacePhase, workspaces, snapshot.repos, projectAreas])
   // The query outlives the tree and the input (both wide-only) so collapsing
   // does not silently drop an in-progress filter.
   const [query, setQuery] = useState('')
@@ -1048,6 +1153,19 @@ export function WorkspaceBrowser({
     })
   }
   const pathPromptTrimmed = (pathPrompt ?? '').trim()
+
+  // Project sections are view-only plugin data: these actions never mutate a
+  // repository or Host Workspace.
+  const [areaDialog, setAreaDialog] = useState<{ mode: 'create' } | { mode: 'rename'; id: string } | null>(null)
+  const [areaDraft, setAreaDraft] = useState('')
+  const areaTrimmed = areaDraft.trim()
+  const closeAreaDialog = () => { setAreaDialog(null); setAreaDraft('') }
+  const confirmAreaDialog = () => {
+    if (areaDialog === null || areaTrimmed === '') return
+    if (areaDialog.mode === 'create') actions.createProjectArea(crypto.randomUUID(), areaTrimmed)
+    else actions.renameProjectArea(areaDialog.id, areaTrimmed)
+    closeAreaDialog()
+  }
 
   const openSearchResult = (sessionId: SessionId): void => {
     setRevealSessionId(sessionId)
@@ -1338,6 +1456,18 @@ export function WorkspaceBrowser({
           </div>
         )}
         <div className={clsx(css.headerActions, wide && searchExpanded && css.headerActionsHidden)}>
+          {wide && groupBy === 'workspace' && (
+            <Tooltip label={t('area.add')} side="bottom" delayMs={500}>
+              <button
+                type="button"
+                className={css.iconButton}
+                aria-label={t('area.add')}
+                onClick={() => { setAreaDraft(''); setAreaDialog({ mode: 'create' }) }}
+              >
+                <IconPlusOutline16 />
+              </button>
+            </Tooltip>
+          )}
           {wide && (
             <ViewOptionsMenu
               groupBy={groupBy}
@@ -1445,6 +1575,13 @@ export function WorkspaceBrowser({
                 t={t}
                 snapshot={snapshot}
                 worktrees={worktrees}
+                projectAreas={projectAreas}
+                onProjectAreaRenameRequest={(areaId, currentName) => {
+                  setAreaDraft(currentName)
+                  setAreaDialog({ mode: 'rename', id: areaId })
+                }}
+                onProjectAreaDissolve={(areaId) => { actions.dissolveProjectArea(areaId) }}
+                onRepoProjectAreaChange={(repoKey, areaId) => { actions.setRepoProjectArea(repoKey, areaId) }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
                   setRenameDraft(currentTitle)
@@ -1462,6 +1599,38 @@ export function WorkspaceBrowser({
               />
             ))}
       </div>
+
+      <Modal
+        open={areaDialog !== null}
+        onClose={closeAreaDialog}
+        closeLabel={t('close')}
+        title={t(areaDialog?.mode === 'rename' ? 'area.rename.title' : 'area.create.title')}
+        footer={(
+          <>
+            <Button variant="outline" onClick={closeAreaDialog}>{t('cancel')}</Button>
+            <Button variant="primary" disabled={areaTrimmed === ''} onClick={confirmAreaDialog}>
+              {areaDialog?.mode === 'rename' ? t('rename') : t('add.confirm')}
+            </Button>
+          </>
+        )}
+      >
+        <input
+          className={css.renameInput}
+          value={areaDraft}
+          aria-label={t('field.areaName')}
+          autoFocus
+          onFocus={(e) => { e.target.select() }}
+          onChange={(e) => { setAreaDraft(e.target.value) }}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => { composingRef.current = false }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !composingRef.current) {
+              e.preventDefault()
+              confirmAreaDialog()
+            }
+          }}
+        />
+      </Modal>
 
       <Modal
         open={renameTarget !== null}

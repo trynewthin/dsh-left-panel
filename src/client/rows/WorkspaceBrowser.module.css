@@ -107,7 +107,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  max-width: 60px;
+  max-width: 92px;
   opacity: 1;
   overflow: hidden;
   visibility: visible;
@@ -375,6 +375,14 @@
 }
 
 .groupSection + .groupSection {
+  margin-top: 4px;
+}
+
+.projectArea + .projectArea {
+  margin-top: 8px;
+}
+
+.projectArea > .groupSection + .groupSection {
   margin-top: 4px;
 }
 
