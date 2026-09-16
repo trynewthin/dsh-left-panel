@@ -57,6 +57,7 @@ type WorkspaceViewActions = {
   renameProjectArea: (draft: WorkspaceViewState, id: string, name: string) => void
   dissolveProjectArea: (draft: WorkspaceViewState, id: string) => void
   setRepoProjectArea: (draft: WorkspaceViewState, repoKey: string, areaId: string | null) => void
+  setProjectAreaOrder: (draft: WorkspaceViewState, areaIds: string[]) => void
 }
 
 /**
@@ -115,6 +116,20 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
         if (areaId === null) return
         const target = d.projectAreas.find(area => area.id === areaId)
         if (target !== undefined) target.repoKeys.push(repoKey)
+      },
+      setProjectAreaOrder: (d, areaIds: string[]) => {
+        d.projectAreas ??= []
+        const byId = new Map(d.projectAreas.map(area => [area.id, area]))
+        const included = new Set<string>()
+        const ordered: ProjectArea[] = []
+        for (const id of areaIds) {
+          const area = byId.get(id)
+          if (area === undefined || included.has(id)) continue
+          ordered.push(area)
+          included.add(id)
+        }
+        for (const area of d.projectAreas) if (!included.has(area.id)) ordered.push(area)
+        d.projectAreas = ordered
       },
     },
   })

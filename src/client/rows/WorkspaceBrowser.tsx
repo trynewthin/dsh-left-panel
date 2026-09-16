@@ -33,7 +33,7 @@ import {
 } from '../tree.ts'
 import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
-import { projectAreasOrEmpty, type ProjectArea } from '../project-areas.ts'
+import { moveProjectAreaOrder, projectAreasOrEmpty, type ProjectArea } from '../project-areas.ts'
 import type { WorktreeSnapshot } from '../../protocol.ts'
 import css from './WorkspaceBrowser.module.css'
 
@@ -248,6 +248,11 @@ interface WorkspaceDragState {
   over: { ids: readonly string[]; half: 'before' | 'after' } | null
 }
 
+interface ProjectAreaDragState {
+  id: string
+  over: { id: string; half: 'before' | 'after' } | null
+}
+
 /** Resolve an insertion side from the full rendered workspace group. */
 function workspaceGroupHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' | 'after' {
   const rect = e.currentTarget.getBoundingClientRect()
@@ -289,6 +294,7 @@ type SessionTreeProps = Pick<
   onProjectAreaRenameRequest: (areaId: string, currentName: string) => void
   onProjectAreaDissolve: (areaId: string) => void
   onRepoProjectAreaChange: (repoKey: string, areaId: string | null) => void
+  onProjectAreaOrderChange: (areaIds: string[]) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned session rename dialog. */
@@ -313,6 +319,7 @@ function SessionTree({
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, snapshot, worktrees,
   projectAreas, onProjectAreaRenameRequest, onProjectAreaDissolve, onRepoProjectAreaChange,
+  onProjectAreaOrderChange,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
@@ -327,8 +334,10 @@ function SessionTree({
   const sessionDropCommitted = useRef(false)
   const [workspaceDrag, setWorkspaceDrag] = useState<WorkspaceDragState | null>(null)
   const workspaceDropCommitted = useRef(false)
+  const [projectAreaDrag, setProjectAreaDrag] = useState<ProjectAreaDragState | null>(null)
+  const projectAreaDropCommitted = useRef(false)
   const previousOrderBy = useRef(orderBy)
-  const nativeDragActive = drag !== null || workspaceDrag !== null
+  const nativeDragActive = drag !== null || workspaceDrag !== null || projectAreaDrag !== null
   useNativeDragAcceptance(nativeDragActive)
   const currentGroup = current === undefined || !workspaceReady
     ? undefined
@@ -488,6 +497,17 @@ function SessionTree({
     workspaceDropCommitted.current = true
     setWorkspaceDrag(null)
     if (activeDrag.sourceAreaId !== areaId) onRepoProjectAreaChange(activeDrag.projectKey, areaId)
+  }
+  const commitProjectAreaOrder = (
+    activeDrag: ProjectAreaDragState,
+    over: NonNullable<ProjectAreaDragState['over']>,
+  ): void => {
+    if (projectAreaDropCommitted.current) return
+    projectAreaDropCommitted.current = true
+    setProjectAreaDrag(null)
+    const current = projectAreas.map(area => area.id)
+    const next = moveProjectAreaOrder(current, activeDrag.id, over.id, over.half)
+    if (!next.every((id, index) => id === current[index])) onProjectAreaOrderChange(next)
   }
   /** One Workspace group: header row + expanded top-level session rows. */
   const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
@@ -742,13 +762,38 @@ function SessionTree({
     const areaId = area?.id ?? null
     const expansionKey = area === null ? DEFAULT_PROJECT_AREA_KEY : projectAreaExpansionKey(area.id)
     const expanded = groupExpansion[expansionKey] ?? true
-    const canAccept = workspaceDrag?.projectKey !== undefined && workspaceDrag.sourceAreaId !== areaId
+    const canAccept = projectAreaDrag === null
+      && workspaceDrag?.projectKey !== undefined && workspaceDrag.sourceAreaId !== areaId
     return (
       <ProjectAreaHeader
         key={area?.id ?? '__default_project_area__'}
         name={area?.name ?? t('area.default')}
         expanded={expanded}
         active={workspaceDrag?.overAreaId === areaId}
+        drag={area === null ? undefined : {
+          active: projectAreaDrag !== null,
+          marker: projectAreaDrag?.over?.id === area.id ? projectAreaDrag.over.half : null,
+          start: () => {
+            projectAreaDropCommitted.current = false
+            setProjectAreaDrag({ id: area.id, over: null })
+          },
+          hover: (half) => {
+            setProjectAreaDrag(current => current === null
+              ? current
+              : { ...current, over: { id: area.id, half } })
+          },
+          drop: (half) => {
+            if (projectAreaDrag !== null) commitProjectAreaOrder(projectAreaDrag, { id: area.id, half })
+          },
+          end: () => {
+            if (projectAreaDrag?.over !== null && projectAreaDrag?.over !== undefined) {
+              commitProjectAreaOrder(projectAreaDrag, projectAreaDrag.over)
+            } else {
+              setProjectAreaDrag(null)
+            }
+            projectAreaDropCommitted.current = false
+          },
+        }}
         onToggle={() => { setGroupExpanded(expansionKey, !expanded) }}
         t={t}
         {...area === null ? {} : {
@@ -1586,6 +1631,7 @@ export function WorkspaceBrowser({
                 }}
                 onProjectAreaDissolve={(areaId) => { actions.dissolveProjectArea(areaId) }}
                 onRepoProjectAreaChange={(repoKey, areaId) => { actions.setRepoProjectArea(repoKey, areaId) }}
+                onProjectAreaOrderChange={(areaIds) => { actions.setProjectAreaOrder(areaIds) }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
                   setRenameDraft(currentTitle)

@@ -89,11 +89,22 @@ export interface RowDragProps {
   end: () => void
 }
 
+/** Drag lifecycle for reordering complete custom project sections. */
+export interface ProjectAreaDragProps {
+  active: boolean
+  marker: 'before' | 'after' | null
+  start: () => void
+  hover: (half: 'before' | 'after') => void
+  drop: (half: 'before' | 'after') => void
+  end: () => void
+}
+
 /** Visual project-section heading. Actions appear only while the heading is hovered. */
-export function ProjectAreaHeader({ name, expanded, active, onToggle, onRename, onDissolve, onDragOver, onDrop, t }: {
+export function ProjectAreaHeader({ name, expanded, active, drag, onToggle, onRename, onDissolve, onDragOver, onDrop, t }: {
   name: string
   expanded: boolean
   active: boolean
+  drag?: ProjectAreaDragProps | undefined
   onToggle: () => void
   onRename?: (() => void) | undefined
   onDissolve?: (() => void) | undefined
@@ -104,18 +115,42 @@ export function ProjectAreaHeader({ name, expanded, active, onToggle, onRename, 
   const [menuOpen, setMenuOpen] = useState(false)
   return (
     <div
-      className={clsx(css.areaHeader, active && css.areaHeaderActive, menuOpen && css.menuOpen)}
+      className={clsx(
+        css.areaHeader,
+        active && css.areaHeaderActive,
+        menuOpen && css.menuOpen,
+        drag?.marker === 'before' && css.areaDropBefore,
+        drag?.marker === 'after' && css.areaDropAfter,
+      )}
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
+      draggable={drag !== undefined}
       onClick={onToggle}
+      onDragStart={drag === undefined ? undefined : (event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', name)
+        drag.start()
+      }}
+      onDragEnd={drag?.end}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return
         event.preventDefault()
         onToggle()
       }}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
+      onDragOver={drag?.active === true
+        ? (event) => {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          drag.hover(rowHalf(event))
+        }
+        : onDragOver}
+      onDrop={drag?.active === true
+        ? (event) => {
+          event.preventDefault()
+          drag.drop(rowHalf(event))
+        }
+        : onDrop}
     >
       <span className={css.areaName}>{name}</span>
       <span className={css.areaChevron}>

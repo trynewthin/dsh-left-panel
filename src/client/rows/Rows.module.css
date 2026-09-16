@@ -31,6 +31,21 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.areaDropBefore::before,
+.areaDropAfter::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.areaHeader { position: relative; }
+.areaDropBefore::before { top: -5px; }
+.areaDropAfter::after { bottom: -5px; }
+
 .areaName {
   min-width: 0;
   max-width: calc(100% - 48px);
