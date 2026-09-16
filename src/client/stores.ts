@@ -11,6 +11,9 @@
  * share from the return type.
  */
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
+import type { ProjectArea } from './project-areas.ts'
+
+export type { ProjectArea } from './project-areas.ts'
 
 /** Browser-local order account for the hierarchy-free flat Session list. */
 export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
@@ -19,14 +22,6 @@ export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
 export type SessionGroupBy = 'workspace' | 'flat'
 /** Session order: user-arranged only, or user-arranged plus activity promotion. */
 export type SessionOrderBy = 'manual' | 'updated'
-
-/** One plugin-owned visual bucket for repository nodes. */
-export interface ProjectArea {
-  id: string
-  name: string
-  /** Repository keys assigned to this area. A repository belongs to at most one area. */
-  repoKeys: string[]
-}
 
 /** Workspace browser viewing state persisted across surface remounts and reloads. */
 type WorkspaceViewState = {

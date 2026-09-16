@@ -32,7 +32,8 @@ import {
   repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
 } from '../tree.ts'
 import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
-import { FLAT_SESSION_ORDER_KEY, type ProjectArea } from '../stores.ts'
+import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
+import { projectAreasOrEmpty, type ProjectArea } from '../project-areas.ts'
 import type { WorktreeSnapshot } from '../../protocol.ts'
 import css from './WorkspaceBrowser.module.css'
 
@@ -1068,8 +1069,11 @@ export function WorkspaceBrowser({
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
-  // `?? []` migrates installations whose persisted view predates project sections.
-  const projectAreas = useStore(s => s.projectAreas ?? [])
+  // Old persisted v1 documents lack projectAreas. The module-level fallback
+  // must retain identity or this value retriggers the account-retention effect
+  // after every store write (React maximum update depth / invariant 185).
+  const persistedProjectAreas = useStore(s => s.projectAreas as ProjectArea[] | undefined)
+  const projectAreas = projectAreasOrEmpty(persistedProjectAreas)
   const currentBlankSessionId = useSessions((state) => {
     const current = state.current
     return current !== undefined && state.byId[current]?.blank === true ? current : undefined

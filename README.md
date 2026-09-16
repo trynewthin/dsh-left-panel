@@ -38,7 +38,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ## 已验证（0.1.5-rc.2，真实宿主）
 
-1. `pnpm typecheck`、`pnpm build`、`pnpm test`（45 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态持久化、真实 git 仓库驱动的服务集成、客户端层级与选择器折叠、拖动边界、构建产物冒烟）全部通过。
+1. `pnpm typecheck`、`pnpm build`、`pnpm test`（47 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态与升级迁移、真实 git 仓库驱动的服务集成、客户端层级与选择器折叠、拖动边界、构建产物冒烟）全部通过。
 2. 隔离 `DSH_HOME` 启动真实 `dsh web`，通过官方 RPC 添加仓库主目录：两个 linked worktree 在数秒内被自动注册，以分支名命名，紧跟主工作区排序。
 3. `git worktree add`/`remove` 实时联动（fs.watch + 轮询兜底）；目录消失与 git 枚举消失都走宽限注销。
 4. 手动删除 worktree 工作区 → 那一行立即消失且不再自动重建（宿主实测：工作区列表保持干净）；把该目录重新添加回来 → 墓碑自动清除，插件重新接管（分支改名继续跟随）。
