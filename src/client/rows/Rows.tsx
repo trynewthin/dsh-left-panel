@@ -330,6 +330,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
 /** Hover-card body for a repository node: name, main worktree path, scan error. */
 function RepoHoverContent({ section, home, t }: { section: RepoSection; home: string | undefined; t: RowTranslate }) {
   const { repo } = section
+  const deletedWorktrees = repo.deletedWorktrees ?? []
   return (
     <div className={css.hoverContent}>
       <div className={css.hoverTitle}>{repo.name}</div>
@@ -376,10 +377,10 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
   const menuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutline16 /> },
-    ...(repo.deletedWorktrees.length === 0 ? [] : [{
+    ...(deletedWorktrees.length === 0 ? [] : [{
       id: 'deleted-branches',
       label: t('repo.menu.deletedBranches'),
-      submenu: repo.deletedWorktrees.map(worktree => ({
+      submenu: deletedWorktrees.map(worktree => ({
         id: `restore:${worktree.path}`,
         label: worktree.branch ?? worktree.title,
       })),

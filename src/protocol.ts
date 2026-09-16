@@ -72,7 +72,8 @@ export interface RepoInfo {
   readonly mainPath: string
   readonly worktrees: readonly WorktreeInfo[]
   /** Worktree Workspace records explicitly removed by the user and available for restoration. */
-  readonly deletedWorktrees: readonly DeletedWorktreeInfo[]
+  /** Optional while an older host snapshot is still cached during a plugin upgrade. */
+  readonly deletedWorktrees?: readonly DeletedWorktreeInfo[]
   /** Last git failure for this repository, when the scan could not complete. */
   readonly error?: string
 }
