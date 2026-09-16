@@ -16,8 +16,8 @@ test('groups New Session workspace choices by repository in durable order', () =
   const workspaces = [workspace('a2', 'feature'), workspace('plain', 'notes'), workspace('a1', 'main'), workspace('b1', 'main')]
   const snapshot: WorktreeSnapshot = {
     repos: [
-      { key: 'repo-a', name: 'Project A', mainPath: '/a', worktrees: [] },
-      { key: 'repo-b', name: 'Project B', mainPath: '/b', worktrees: [] },
+      { key: 'repo-a', name: 'Project A', mainPath: '/a', worktrees: [], deletedWorktrees: [] },
+      { key: 'repo-b', name: 'Project B', mainPath: '/b', worktrees: [], deletedWorktrees: [] },
     ],
     workspaceRepo: { a1: 'repo-a', a2: 'repo-a', b1: 'repo-b' },
     syncedAt: 1,
@@ -35,8 +35,8 @@ test('folds nested workspace choices while keeping project headings and plain wo
   const workspaces = [workspace('a1', 'main'), workspace('a2', 'feature'), workspace('plain', 'notes'), workspace('b1', 'main')]
   const snapshot: WorktreeSnapshot = {
     repos: [
-      { key: 'repo-a', name: 'Project A', mainPath: '/a', worktrees: [] },
-      { key: 'repo-b', name: 'Project B', mainPath: '/b', worktrees: [] },
+      { key: 'repo-a', name: 'Project A', mainPath: '/a', worktrees: [], deletedWorktrees: [] },
+      { key: 'repo-b', name: 'Project B', mainPath: '/b', worktrees: [], deletedWorktrees: [] },
     ],
     workspaceRepo: { a1: 'repo-a', a2: 'repo-a', b1: 'repo-b' },
     syncedAt: 1,

@@ -512,6 +512,9 @@ function SessionTree({
   /** One Workspace group: header row + expanded top-level session rows. */
   const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
     const workspaceId = group.workspaceId
+    const deletable = nested && repoKey !== undefined && snapshot.repos
+      .find(repo => repo.key === repoKey)?.worktrees
+      .some(worktree => worktree.workspaceId === workspaceId && !worktree.main) === true
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
     const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
@@ -602,9 +605,9 @@ function SessionTree({
               rename: () => {
                 if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
               },
-              delete: () => {
-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-              },
+              ...(deletable
+                ? { delete: () => { onDeleteRequest(group.workspaceId as WorkspaceId, group.label) } }
+                : {}),
             }}
         />
         {(sessionsExpanded
@@ -753,6 +756,7 @@ function SessionTree({
           onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
           onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
           onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
+          onRestore={(path) => { worktrees.restoreWorkspace(path).catch(warnRejected('workspace restore')) }}
         />
         {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
       </div>
@@ -1090,7 +1094,6 @@ export function WorkspaceBrowser({
   renameSession,
   forkSession,
   renameWorkspace,
-  deleteWorkspace,
   insertWorkspaceBefore,
   archiveSession,
   insertSessionBefore,
@@ -1430,7 +1433,7 @@ export function WorkspaceBrowser({
     setDeleting(true)
     setDeleteCommittedId(null)
     setDeleteError(null)
-    deleteWorkspace(deleteTarget.workspaceId).then(() => {
+    worktrees.deleteWorkspace(deleteTarget.workspaceId).then(() => {
       // Keep the confirmation pending until this component has rendered the
       // committed list projection without the deleted id. Closing earlier
       // exposes one stale React frame to the next Create Workspace gesture.

@@ -81,8 +81,6 @@ export type WorkspaceBrowserInjected = {
   forkSession: (sessionId: SessionId) => void
   /** Rename a plain Host Workspace (global conflict policy; worktrees use the plugin action). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
-  /** Delete only a Host Workspace registration; directory and Session logs remain. */
-  deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /**
    * Reorder a Workspace in the durable registry display order.
    * Omitted anchor appends to the end.

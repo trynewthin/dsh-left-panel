@@ -9,15 +9,25 @@ import { homedir } from 'node:os'
 export interface PersistedState {
   readonly version: 1
   readonly ignored: readonly string[]
+  /** User-removed Workspace records that remain available for explicit restoration. */
+  readonly deletedWorktrees: readonly DeletedWorktree[]
   readonly knownWorktrees: Readonly<Record<string, string>>
   readonly autoTitles: Readonly<Record<string, string>>
   /** Display name per repository key; empty means "derive it from the main worktree". */
   readonly repoNames: Readonly<Record<string, string>>
 }
 
+export interface DeletedWorktree {
+  readonly repoKey: string
+  readonly path: string
+  readonly branch: string | null
+  readonly title: string
+}
+
 export const EMPTY_STATE: PersistedState = {
   version: 1,
   ignored: [],
+  deletedWorktrees: [],
   knownWorktrees: {},
   autoTitles: {},
   repoNames: {},
@@ -40,6 +50,25 @@ function stringRecord(value: unknown): Record<string, string> {
   return out
 }
 
+function deletedWorktrees(value: unknown): DeletedWorktree[] {
+  if (!Array.isArray(value)) return []
+  const out = new Map<string, DeletedWorktree>()
+  for (const entry of value) {
+    if (!isRecord(entry)
+      || typeof entry.repoKey !== 'string'
+      || typeof entry.path !== 'string'
+      || (entry.branch !== null && typeof entry.branch !== 'string')
+      || typeof entry.title !== 'string') continue
+    out.set(entry.path, {
+      repoKey: entry.repoKey,
+      path: entry.path,
+      branch: entry.branch,
+      title: entry.title,
+    })
+  }
+  return [...out.values()]
+}
+
 /** Coerce an arbitrary parsed document into a valid state, dropping malformed fields. */
 export function normalizeState(value: unknown): PersistedState {
   if (!isRecord(value)) return EMPTY_STATE
@@ -47,6 +76,7 @@ export function normalizeState(value: unknown): PersistedState {
   return {
     version: 1,
     ignored: [...new Set(ignored)],
+    deletedWorktrees: deletedWorktrees(value.deletedWorktrees),
     knownWorktrees: stringRecord(value.knownWorktrees),
     autoTitles: stringRecord(value.autoTitles),
     repoNames: stringRecord(value.repoNames),

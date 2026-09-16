@@ -25,10 +25,14 @@ export const ENDPOINT_PREFIX = 'left-panel'
  * - `sync`: reconcile now, then answer (the browser's Refresh action).
  * - `setRepoName`: set the repository's display name; an empty name restores the derived one.
  * - `setWorkspaceTitle`: rename one worktree Workspace, with conflicts scoped to its repository.
+ * - `deleteWorkspace`: remove only a linked-worktree Workspace record and retain a tombstone.
+ * - `restoreWorkspace`: clear that tombstone and register the unchanged worktree directory again.
  */
-export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle'
+export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle' | 'deleteWorkspace' | 'restoreWorkspace'
 
-export const ENDPOINTS: readonly Endpoint[] = ['list', 'sync', 'setRepoName', 'setWorkspaceTitle']
+export const ENDPOINTS: readonly Endpoint[] = [
+  'list', 'sync', 'setRepoName', 'setWorkspaceTitle', 'deleteWorkspace', 'restoreWorkspace',
+]
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */
 export function methodOf(endpoint: Endpoint): string {
@@ -67,8 +71,16 @@ export interface RepoInfo {
   /** Canonical path of the main worktree. */
   readonly mainPath: string
   readonly worktrees: readonly WorktreeInfo[]
+  /** Worktree Workspace records explicitly removed by the user and available for restoration. */
+  readonly deletedWorktrees: readonly DeletedWorktreeInfo[]
   /** Last git failure for this repository, when the scan could not complete. */
   readonly error?: string
+}
+
+export interface DeletedWorktreeInfo {
+  readonly path: string
+  readonly branch: string | null
+  readonly title: string
 }
 
 /** Everything the browser half needs to draw repositories and their worktrees. */

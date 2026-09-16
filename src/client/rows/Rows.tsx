@@ -220,7 +220,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  actions?: { rename: () => void; delete?: (() => void) | undefined } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -236,7 +236,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
-    { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
+    ...(actions?.delete === undefined ? [] : [
+      { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
+    ]),
   ]
   const ownRow = (
     <div
@@ -279,7 +281,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
               /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
               if (id !== 'rename' && id !== 'delete') return
               if (id === 'rename') actions.rename()
-              else actions.delete()
+              else actions.delete?.()
             }}
             portal
             closeOnPointerLeave
@@ -355,11 +357,12 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onRefresh, onRename, drag, home, t }: {
+export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore, drag, home, t }: {
   section: RepoSection
   onToggle: () => void
   onRefresh: () => void
   onRename: () => void
+  onRestore: (path: string) => void
   /** Present when the node can be reordered among the other sections. */
   drag?: WorkspaceRowDragProps | undefined
   home?: string | undefined
@@ -373,6 +376,14 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, drag, home
   const menuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutline16 /> },
+    ...(repo.deletedWorktrees.length === 0 ? [] : [{
+      id: 'deleted-branches',
+      label: t('repo.menu.deletedBranches'),
+      submenu: repo.deletedWorktrees.map(worktree => ({
+        id: `restore:${worktree.path}`,
+        label: worktree.branch ?? worktree.title,
+      })),
+    }]),
   ]
   const ownRow = (
     <div
@@ -409,6 +420,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, drag, home
             setMenuOpen(false)
             if (id === 'rename') onRename()
             if (id === 'refresh') onRefresh()
+            if (id.startsWith('restore:')) onRestore(id.slice('restore:'.length))
           }}
           portal
           closeOnPointerLeave

@@ -287,6 +287,31 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.ok(registry.get(main.id), 'main workspace untouched')
   })
 
+  await t.test('deletes only the workspace record into a durable tombstone and restores its sessions', async () => {
+    const feat = await registry.resolveByPath(featPath)
+    assert.ok(feat)
+    const removed = await harness.rpc('deleteWorkspace', { workspaceId: feat.id })
+    assert.equal(await realpath(featPath), featPath, 'working directory retained')
+    assert.equal(registry.get(feat.id), undefined, 'workspace registration removed')
+    assert.deepEqual(removed.repos[0]?.deletedWorktrees.map(entry => [entry.branch, entry.title]), [
+      ['feat/z', 'My branch'],
+    ])
+    await harness.service.syncNow()
+    assert.equal(registry.list().some(workspace => workspace.path === featPath), false, 'tombstoned path is not auto-registered')
+    assert.equal(harness.service.snapshot().repos[0]?.worktrees.find(entry => entry.path === featPath)?.workspaceId, null)
+    const persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(featPath), true)
+    assert.equal(persisted.state.deletedWorktrees[0]?.path, featPath)
+
+    const restoredSnapshot = await harness.rpc('restoreWorkspace', { path: featPath })
+    assert.equal(restoredSnapshot.repos[0]?.deletedWorktrees.length, 0)
+    assert.equal(await realpath(featPath), featPath)
+    const restored = await registry.resolveByPath(featPath)
+    assert.ok(restored)
+    assert.equal(restored.title, 'My branch', 'custom workspace title restored')
+    assert.deepEqual(restored.sessionIds, ['session-orphan'], 'sessions reattached by their retained cwd')
+  })
+
   await t.test('a user delete is not re-registered, and adding the directory back resumes management', async () => {
     const feat = await registry.resolveByPath(featPath)
     assert.ok(feat)
@@ -343,7 +368,8 @@ test('worktree sync end to end against a real repository', async (t) => {
     // The plugin has no per-repository switches and no manual registration:
     // reconciliation is continuous and the browser only reads or refreshes.
     assert.deepEqual(harness.routePaths().sort(), [
-      '/api/left-panel/list', '/api/left-panel/setRepoName', '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
+      '/api/left-panel/deleteWorkspace', '/api/left-panel/list', '/api/left-panel/restoreWorkspace',
+      '/api/left-panel/setRepoName', '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
     ])
     assert.equal(harness.service.snapshot().repos.length, 1)
   })

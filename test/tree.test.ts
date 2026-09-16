@@ -33,6 +33,7 @@ function repo(key: string, worktrees: WorktreeInfo[]): RepoInfo {
     name: key.split('/').slice(-2, -1)[0] ?? key,
     mainPath: worktrees.find(w => w.main)?.path ?? '',
     worktrees,
+    deletedWorktrees: [],
   }
 }
 

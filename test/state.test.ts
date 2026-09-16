@@ -28,6 +28,7 @@ test('save then load round-trips and creates parent directories', async () => {
     const state = {
       version: 1 as const,
       ignored: ['/wt/x'],
+      deletedWorktrees: [],
       knownWorktrees: { '/wt/y': '/repo/.git' },
       autoTitles: { '/wt/y': 'feat/y' },
       repoNames: { '/repo/.git': '项目别名' },
@@ -53,6 +54,11 @@ test('a corrupt file yields the empty state plus an error', async () => {
 test('normalizeState drops malformed fields and duplicate ignores', () => {
   const state = normalizeState({
     ignored: ['/a', '/a', 3, '/b'],
+    deletedWorktrees: [
+      { repoKey: '/repo', path: '/a', branch: 'feat/a', title: 'Feature A' },
+      { repoKey: '/repo', path: '/a', branch: 'feat/a', title: 'Feature A newer' },
+      { path: 7 },
+    ],
     knownWorktrees: { '/wt': '/repo', broken: 1 },
     autoTitles: null,
     repoNames: { ok: 'alias', bad: 7 },
@@ -60,6 +66,9 @@ test('normalizeState drops malformed fields and duplicate ignores', () => {
   assert.deepEqual(state, {
     version: 1,
     ignored: ['/a', '/b'],
+    deletedWorktrees: [
+      { repoKey: '/repo', path: '/a', branch: 'feat/a', title: 'Feature A newer' },
+    ],
     knownWorktrees: { '/wt': '/repo' },
     autoTitles: {},
     repoNames: { ok: 'alias' },
