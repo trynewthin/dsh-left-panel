@@ -1,5 +1,5 @@
 /**
- * Derived from @deepseek-ai/dsh-client-ui-workspace 0.1.5-rc.2 (MIT License,
+ * Derived from @deepseek-ai/dsh-client-ui-workspace 0.1.6-alpha.2 (MIT License,
  * Copyright (c) 2026 DeepSeek). Adapted for dsh-left-panel: repositories
  * group their worktrees and Workspace registration follows git.
  */

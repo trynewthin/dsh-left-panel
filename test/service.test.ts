@@ -293,7 +293,7 @@ test('worktree sync end to end against a real repository', async (t) => {
     const removed = await harness.rpc('deleteWorkspace', { workspaceId: feat.id })
     assert.equal(await realpath(featPath), featPath, 'working directory retained')
     assert.equal(registry.get(feat.id), undefined, 'workspace registration removed')
-    assert.deepEqual(removed.repos[0]?.deletedWorktrees.map(entry => [entry.branch, entry.title]), [
+    assert.deepEqual(removed.repos[0]?.deletedWorktrees?.map(entry => [entry.branch, entry.title]), [
       ['feat/z', 'My branch'],
     ])
     await harness.service.syncNow()
@@ -304,7 +304,7 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.equal(persisted.state.deletedWorktrees[0]?.path, featPath)
 
     const restoredSnapshot = await harness.rpc('restoreWorkspace', { path: featPath })
-    assert.equal(restoredSnapshot.repos[0]?.deletedWorktrees.length, 0)
+    assert.equal(restoredSnapshot.repos[0]?.deletedWorktrees?.length, 0)
     assert.equal(await realpath(featPath), featPath)
     const restored = await registry.resolveByPath(featPath)
     assert.ok(restored)

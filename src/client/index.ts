@@ -71,9 +71,11 @@ export function apply(ctx: Context): void {
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
     renameSession: async (sessionId, title) => {
-      const session = sessions.binding(sessionId)?.session
-      if (session === undefined) throw new Error(`unknown session "${sessionId}"`)
-      const result = await session.rename(title)
+      const result = await sessions.using(
+        sessionId,
+        { source: 'workspaceOperation' },
+        reference => reference.binding.session.rename(title),
+      )
       if (!result.ok) throw new Error(result.error.message)
     },
     forkSession: (sessionId) => {

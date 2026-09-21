@@ -14,7 +14,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 - **新会话选择器**：新会话页的工作区菜单同样按「项目 → worktree」分组；项目可独立展开/收起，默认只展开当前工作区所属项目。普通工作区保持单行，添加工作区入口固定在底部。
 - **拖动排序**：项目节点、普通工作区行与项目内 worktree 子行都能拖动。项目节点拖动其名下整组工作区；worktree 子行只允许在所属项目内移动。两层顺序都复用 DSH 的同一条持久 Workspace 顺序，卸载插件后仍然成立。
 - **既有会话迁移**：注册某个 worktree 时，cwd 指向该目录的既有会话会被自动挂入这个新工作区（走官方 `attachSession`，cwd 校验由官方保证无法挂错）。因此你过去在没有该工作区时于 worktree 目录里创建、一直躺在"未分组"里的会话，安装后会直接出现在对应的 worktree 下——会话日志不动，只是归属到正确分组。
-- **保留原生交互**：本插件的整体替换基于官方 `ui-workspace` 浏览器（派生自 `@deepseek-ai/dsh-client-ui-workspace` 0.1.5-rc.2，MIT），展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式等全部保留。
+- **保留原生交互**：本插件的整体替换基于官方 `ui-workspace` 浏览器（派生自 `@deepseek-ai/dsh-client-ui-workspace` 0.1.6-alpha.2，MIT），展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式等全部保留。
 
 ## 实现方式（遮蔽说明）
 
@@ -36,9 +36,9 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 以上行为在隔离 `DSH_HOME` 中用真实宿主实测过三阶段：装插件前在 worktree 目录建会话（落在未分组）→ 装插件后该会话被挂入 worktree 工作区 → 卸载后工作区、账本、会话日志全部保留。
 
-## 已验证（0.1.5-rc.2，真实宿主）
+## 已验证（0.1.6-alpha.2，真实宿主）
 
-1. `pnpm typecheck`、`pnpm build`、`pnpm test`（48 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态与升级迁移、真实 git 仓库驱动的服务集成、客户端层级与选择器折叠、项目/分区拖动边界、构建产物冒烟）全部通过。
+1. `pnpm typecheck`、`pnpm build`、`pnpm test`（49 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态与升级迁移、真实 git 仓库驱动的服务集成、客户端层级与选择器折叠、项目/分区拖动边界、构建产物冒烟）全部通过。
 2. 隔离 `DSH_HOME` 启动真实 `dsh web`，通过官方 RPC 添加仓库主目录：两个 linked worktree 在数秒内被自动注册，以分支名命名，紧跟主工作区排序。
 3. `git worktree add`/`remove` 实时联动（fs.watch + 轮询兜底）；目录消失与 git 枚举消失都走宽限注销。
 4. 删除项目下的分支工作区 → 只移除 Workspace 注册记录且不再自动重建；worktree 目录和会话保留，从项目菜单“已删除的分支”点击即可恢复记录和原会话分组。

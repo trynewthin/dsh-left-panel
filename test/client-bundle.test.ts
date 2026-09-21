@@ -62,6 +62,8 @@ test('built browser bundle loads through __ModuleLoader__ and exports the plugin
   assert.ok(tailIndex > 0, 'factory tail found')
   const body = code.slice((headMatch.index ?? 0) + headMatch[0].length, tailIndex)
   assert.equal(body.includes('window.__ModuleLoader__'), false, 'wrapper head stripped')
+  assert.equal(body.includes('useSessionPendingInteraction'), false, 'removed 0.1.5 Session UI hook is absent')
+  assert.equal(body.includes('retainedBy.mainView'), true, '0.1.6 main-view selection model is bundled')
   // The factory closes with its own "return module.exports;" (the banner's
   // intro declares the module vars); its return value is the plugin half.
   const fn = new Function('require', body)
