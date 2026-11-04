@@ -13,9 +13,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import clsx from 'clsx'
 import {
-  HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
-  IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
-  IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu,
+  HoverCard, IconAlarmClockOutlineRegular, IconArchiveOutlineRegular, IconBranchOutlineRegular,
+  IconEditOutlineRegular, IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
+  IconPlusOutlineRegular, IconRefreshOutlineRegular, IconTrashOutlineRegular, IconTriangleRightFillRegular, Menu,
   relativeTime, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -154,7 +154,7 @@ export function ProjectAreaHeader({ name, expanded, active, drag, onToggle, onRe
     >
       <span className={css.areaName}>{name}</span>
       <span className={css.areaChevron}>
-        <IconTriangleRightFill14 className={clsx(css.arrow, expanded && css.arrowOpen)} />
+        <IconTriangleRightFillRegular className={clsx(css.arrow, expanded && css.arrowOpen)} />
       </span>
       {(onRename !== undefined || onDissolve !== undefined) && (
         <span className={css.areaActions}>
@@ -162,8 +162,8 @@ export function ProjectAreaHeader({ name, expanded, active, drag, onToggle, onRe
             open={menuOpen}
             onClose={() => { setMenuOpen(false) }}
             items={[
-              ...(onRename === undefined ? [] : [{ id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> }]),
-              ...(onDissolve === undefined ? [] : [{ id: 'dissolve', label: t('area.dissolve'), icon: <IconTrashOutline16 />, danger: true }]),
+              ...(onRename === undefined ? [] : [{ id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> }]),
+              ...(onDissolve === undefined ? [] : [{ id: 'dissolve', label: t('area.dissolve'), icon: <IconTrashOutlineRegular />, danger: true }]),
             ]}
             onSelect={(id) => {
               setMenuOpen(false)
@@ -179,7 +179,7 @@ export function ProjectAreaHeader({ name, expanded, active, drag, onToggle, onRe
                 aria-label={t('area.actions.aria', { name })}
                 onClick={(event) => { event.stopPropagation(); setMenuOpen(value => !value) }}
               >
-                <IconEllipsisOutline16 />
+                <IconEllipsisOutlineRegular />
               </button>
             )}
           />
@@ -235,9 +235,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const active = group.expanded && group.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
+    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
     ...(actions?.delete === undefined ? [] : [
-      { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
+      { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
     ]),
   ]
   const ownRow = (
@@ -259,11 +259,11 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
         {/* A repository is a directory; a worktree under it is a checkout of a branch. */}
         {nested
-          ? <IconBranchOutline16 />
-          : row.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
+          ? <IconBranchOutlineRegular />
+          : row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
-        <IconTriangleRightFill14 className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
+        <IconTriangleRightFillRegular className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
@@ -292,7 +292,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
                 aria-label={t('actions.workspace.aria', { name: label })}
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v) }}
               >
-                <IconEllipsisOutline16 />
+                <IconEllipsisOutlineRegular />
               </button>
             )}
           />
@@ -303,7 +303,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
           aria-label={t('actions.newSession.aria', { name: label })}
           onClick={(e) => { e.stopPropagation(); onCreate() }}
         >
-          <IconPlusOutline16 />
+          <IconPlusOutlineRegular />
         </button>
       </span>
     </div>
@@ -378,8 +378,8 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
   // The tree itself shows how many worktrees there are and reconciliation is
   // continuous, so this cell speaks only when a scan failed.
   const menuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
-    { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutline16 /> },
+    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutlineRegular /> },
     ...(deletedBranchItems.length === 0 ? [] : [{
       id: 'deleted-branches',
       label: t('repo.menu.deletedBranches'),
@@ -403,10 +403,10 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {section.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
+        {section.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
-        <IconTriangleRightFill14 className={clsx(css.arrow, section.expanded && css.arrowOpen)} />
+        <IconTriangleRightFillRegular className={clsx(css.arrow, section.expanded && css.arrowOpen)} />
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{repo.name}</span>
@@ -432,7 +432,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
               aria-label={t('repo.actions.aria', { name: repo.name })}
               onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v) }}
             >
-              <IconEllipsisOutline16 />
+              <IconEllipsisOutlineRegular />
             </button>
           )}
         />
@@ -527,7 +527,7 @@ function ActiveScheduleIndicator({ t, search = false }: { t: RowTranslate; searc
       aria-label={label}
       title={label}
     >
-      <IconAlarmClockOutline16 />
+      <IconAlarmClockOutlineRegular />
     </span>
   )
 }
@@ -651,10 +651,10 @@ export function SessionNodeItem({
   // touches the session log, so it is not styled as destructive and needs no
   // confirmation dialog.
   const sessionMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
-    { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
+    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutlineRegular /> },
     // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
-    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutlineRegular size={16} /> },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
@@ -729,7 +729,7 @@ export function SessionNodeItem({
                 aria-label={t('actions.session.aria', { name: title })}
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v) }}
               >
-                <IconEllipsisOutline16 />
+                <IconEllipsisOutlineRegular />
               </button>
             )}
           />

@@ -4,6 +4,8 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ![dsh-left-panel 界面演示](https://raw.githubusercontent.com/trynewthin/dsh-left-panel/main/docs/ui-demo.png)
 
+当前版本 `0.2.7` 面向 **DSH `0.2.1-rc.5` / Cordis `4.0.5`**；不再兼容 `0.1.6-alpha.2`。依赖与锁文件已整体升级，发布包包含更新后的 Host / Web 构建产物。
+
 - **底层语义不变**：每个 worktree 就是一个真实的 DSH Workspace（会话 cwd = worktree 目录），会话、日志、归档行为与原生完全一致；本插件只做注册/注销与展示分组。
 - **自动同步是唯一行为**：向某个 git 仓库的任意工作树添加工作区后，插件扫描 `git worktree list`，把该仓库其余 worktree 自动注册为工作区（以分支名命名，detached 用短 hash）；worktree 被移除后自动注销（5 秒宽限，避免抖动）。主工作树永不自动注销。没有"自动/手动"开关，也不需要手动注册。
 - **墓碑机制**：删除项目下某个分支工作区时，只删除 Workspace 注册记录，worktree 目录和会话日志保持不变；插件不会自动重建，可从项目菜单的“已删除的分支”重新添加。
@@ -14,7 +16,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 - **新会话选择器**：新会话页的工作区菜单同样按「项目 → worktree」分组；项目可独立展开/收起，默认只展开当前工作区所属项目。普通工作区保持单行，添加工作区入口固定在底部。
 - **拖动排序**：项目节点、普通工作区行与项目内 worktree 子行都能拖动。项目节点拖动其名下整组工作区；worktree 子行只允许在所属项目内移动。两层顺序都复用 DSH 的同一条持久 Workspace 顺序，卸载插件后仍然成立。
 - **既有会话迁移**：注册某个 worktree 时，cwd 指向该目录的既有会话会被自动挂入这个新工作区（走官方 `attachSession`，cwd 校验由官方保证无法挂错）。因此你过去在没有该工作区时于 worktree 目录里创建、一直躺在"未分组"里的会话，安装后会直接出现在对应的 worktree 下——会话日志不动，只是归属到正确分组。
-- **保留原生交互**：本插件的整体替换基于官方 `ui-workspace` 浏览器（派生自 `@deepseek-ai/dsh-client-ui-workspace` 0.1.6-alpha.2，MIT），展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式等全部保留。
+- **保留既有交互**：客户端最初派生自官方 `@deepseek-ai/dsh-client-ui-workspace` 0.1.6-alpha.2（MIT），现已适配 0.2.1-rc.5 的图标、Remote 和会话导航接口；保留展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式。新版官方新增的行操作不会自动进入本插件的替换界面。
 
 ## 实现方式（遮蔽说明）
 
@@ -36,15 +38,17 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 以上行为在隔离 `DSH_HOME` 中用真实宿主实测过三阶段：装插件前在 worktree 目录建会话（落在未分组）→ 装插件后该会话被挂入 worktree 工作区 → 卸载后工作区、账本、会话日志全部保留。
 
-## 已验证（0.1.6-alpha.2，真实宿主）
+## 已验证（0.2.1-rc.5，真实宿主）
 
-1. `pnpm typecheck`、`pnpm build`、`pnpm test`（49 个测试：porcelain 解析、同步决策含宽限期/墓碑/主树保护、状态与升级迁移、真实 git 仓库驱动的服务集成、客户端层级与选择器折叠、项目/分区拖动边界、构建产物冒烟）全部通过。
-2. 隔离 `DSH_HOME` 启动真实 `dsh web`，通过官方 RPC 添加仓库主目录：两个 linked worktree 在数秒内被自动注册，以分支名命名，紧跟主工作区排序。
-3. `git worktree add`/`remove` 实时联动（fs.watch + 轮询兜底）；目录消失与 git 枚举消失都走宽限注销。
-4. 删除项目下的分支工作区 → 只移除 Workspace 注册记录且不再自动重建；worktree 目录和会话保留，从项目菜单“已删除的分支”点击即可恢复记录和原会话分组。
-5. 非 git 目录保持原生单行展示，不受影响。
-6. 插件路由带 cookie 200 / 无 cookie 401（复用官方 `/api` 信任围栏）；client bundle 被宿主组合进 boot graph 并正确下发。
-7. 三阶段数据影响实测：装插件前在 worktree 目录建的会话 → 装插件后自动挂入对应 worktree 工作区 → 卸载后工作区/账本/会话日志全部保留。
+1. `pnpm typecheck`、`pnpm build`、`pnpm test` 全部通过，54 个测试覆盖原有行为、活跃/已结束任务标记边界与新增定时任务目录快照的重连、并发刷新和销毁竞态。
+2. 隔离 `DSH_HOME` 启动本机 0.2.1-rc.5：注册主目录自动发现并注册两个 linked worktree；普通非 git 工作区保持独立。
+3. 真实 `git worktree add` / `remove` 后主动同步；新增工作区出现，删除工作树经 5 秒宽限后注销。
+4. 仓库/工作树重命名、删除墓碑、恢复注册均通过真实 RPC 验证；worktree 目录保留，注册前创建的会话已进入工作区账本。
+5. 插件 RPC 带 cookie 返回 200，无 cookie 返回 401，继续复用官方 `/api` 鉴权。
+6. 真实浏览器验证项目 → worktree 左侧分组、新会话工作区选择器、选择后导航与 fork 后自动打开子会话；未出现槽位异常。
+7. `node demo/dsh.mjs` 自动发现新版 Desktop 启动器，成功启动含两个仓库、五个 worktree 的隔离演示；`Ctrl+C` 后退出码为 0，临时数据已删除。
+
+新版定时任务标记从 Host 的 `schedule/catalog` 读取，跟随 `schedule/changed` 刷新；切换连接时先清空旧 Host 标记，不再读取已移除的 Session `schedule` projection。此轮验证了真实 catalog 读取与异步生命周期测试，未创建会实际执行的提醒。
 
 ## 安装
 
@@ -53,10 +57,16 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 dsh plugin --profile web add /abs/path/to/left-panel
 
 # 未全局安装 dsh CLI 时
-npx @deepseek-ai/dsh plugin --profile web add /abs/path/to/left-panel
+npx @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add /abs/path/to/left-panel
 ```
 
-安装或首次加入 bundle 图后重启 `dsh web`；client 更新后浏览器硬刷新。
+Desktop 使用 `--profile desktop`。安装或首次加入 bundle 图后重启对应 DSH 实例；client 更新后浏览器硬刷新。没有全局 `dsh` 时，macOS 可使用 Desktop 自带命令：
+
+```sh
+"/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" plugin --profile desktop add /abs/path/to/left-panel --ignore-scripts
+```
+
+使用 `--ignore-scripts` 前先在插件目录运行 `pnpm install && pnpm build`。
 
 ## 本地开发
 
@@ -71,7 +81,7 @@ pnpm typecheck && pnpm build && pnpm test
 pnpm demo
 ```
 
-终端会输出带一次性本地 token 的访问地址。演示使用真实 DSH、真实插件和真实 Git worktree；按 `Ctrl+C` 后会停止服务并删除全部临时数据。未全局安装 `dsh` 时，macOS 会自动使用 DSH Desktop Beta 内置 CLI；其他环境可通过 `DSH_BIN=/path/to/dsh pnpm demo` 指定。
+终端会输出带一次性本地 token 的访问地址。演示使用真实 DSH、真实插件和真实 Git worktree；按 `Ctrl+C` 后会停止服务并删除全部临时数据。macOS 自动发现 `/Applications` 或 `~/Applications` 下 DeepSeek Harness 的 `runtime/cli/bin/dsh` 启动器；其他位置或环境可通过 `DSH_BIN=/path/to/dsh pnpm demo` 指定。
 
 `--patch` 覆盖层开发（无需安装到 profile）：
 

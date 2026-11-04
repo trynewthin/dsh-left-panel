@@ -23,6 +23,7 @@ import type { GroupedWorkspacePickerInjected, WorkspaceBrowserInjected } from '.
 import { GroupedWorkspacePicker } from './GroupedWorkspacePicker.tsx'
 import { en, NS, zh } from './locales.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
+import { createScheduleCatalogClient } from './schedules.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { createWorktreeClient } from './worktrees.ts'
 
@@ -37,7 +38,7 @@ export const name = 'left-panel'
  * constrained, so registration waits on the declaration through `slots.inject()`.
  */
 export const inject = [
-  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'layout', 'uiWorkspace', 'connection',
+  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.schedule', 'layout', 'uiWorkspace', 'connection',
 ]
 
 /** Below the shipped entry's default 0: the lowest priority renders. */
@@ -54,6 +55,8 @@ export function apply(ctx: Context): void {
 
   const worktrees = createWorktreeClient(connection, workspaces)
   ctx.effect(() => worktrees.start(), 'left-panel: worktree snapshot')
+  const schedules = createScheduleCatalogClient(ctx)
+  ctx.effect(() => schedules.start(), 'left-panel: schedule catalog')
 
   const searchSessions: WorkspaceBrowserInjected['searchSessions'] = async (query, signal) => {
     const result = await sessions.search(query, signal)
@@ -79,8 +82,8 @@ export function apply(ctx: Context): void {
       if (!result.ok) throw new Error(result.error.message)
     },
     forkSession: (sessionId) => {
-      uiWorkspace.forkSession(sessionId).catch(() => {
-        // Fork or child-rename failure keeps the current selection.
+      uiWorkspace.forkSession(sessionId, childId => uiWorkspace.openSession(childId)).catch(() => {
+        // Failure leaves the source selected, or the created child if only its rename failed.
       })
     },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },
@@ -94,7 +97,11 @@ export function apply(ctx: Context): void {
     createWorkspace: input => workspaces.create(input),
     pickDirectory: () => uiWorkspace.pickDirectory(),
     worktrees: worktrees.actions,
-    hooks: { hostInfo, worktrees: worktrees.source },
+    hooks: {
+      hostInfo,
+      worktrees: worktrees.source,
+      scheduleCatalog: schedules.source,
+    },
   })
   const pickerInjected = (): GroupedWorkspacePickerInjected => ({
     createWorkspace: input => workspaces.create(input),

@@ -23,10 +23,10 @@ test('built browser bundle loads through __ModuleLoader__ and exports the plugin
   }
   const external = new Set(manifest.dsh?.client?.external ?? [])
 
-  const loaded: Array<{ id: string }> = []
+  const loaded: Array<{ id: string; factory: (require: (spec: string) => unknown) => unknown }> = []
   const window_ = {
     __ModuleLoader__: {
-      load: (row: { id: string }): void => { loaded.push(row) },
+      load: (row: typeof loaded[number]): void => { loaded.push(row) },
     },
   } as unknown as typeof globalThis
   const savedWindow = (globalThis as { window?: unknown }).window
@@ -49,25 +49,7 @@ test('built browser bundle loads through __ModuleLoader__ and exports the plugin
 
   assert.equal(loaded.length, 1)
   assert.equal(loaded[0]?.id, 'dsh-left-panel')
-  const factory = (code.match(/factory: \(require\) => \{/)?.length ?? 0) > 0
-  assert.equal(factory, true, 'bundle wraps itself in the ModuleLoader factory form')
-
-  // Execute the captured factory: strip the load(...) wrapper head, the
-  // factory's own closing brace and the wrapper tail, then run the body.
-  const head = /factory: \(require\) => \{\n/
-  const tail = /\n\t\}\n\}\);\s*\n*(?:\/\/# sourceMappingURL=[^\n]*)?\s*$/
-  const headMatch = head.exec(code)
-  assert.ok(headMatch, 'factory head found')
-  const tailIndex = code.search(tail)
-  assert.ok(tailIndex > 0, 'factory tail found')
-  const body = code.slice((headMatch.index ?? 0) + headMatch[0].length, tailIndex)
-  assert.equal(body.includes('window.__ModuleLoader__'), false, 'wrapper head stripped')
-  assert.equal(body.includes('useSessionPendingInteraction'), false, 'removed 0.1.5 Session UI hook is absent')
-  assert.equal(body.includes('retainedBy.mainView'), true, '0.1.6 main-view selection model is bundled')
-  // The factory closes with its own "return module.exports;" (the banner's
-  // intro declares the module vars); its return value is the plugin half.
-  const fn = new Function('require', body)
-  const plugin = fn(require) as { name?: unknown; inject?: unknown; apply?: unknown }
+  const plugin = loaded[0].factory(require) as { name?: unknown; inject?: unknown; apply?: unknown }
   assert.equal(plugin.name, 'left-panel')
   assert.ok(Array.isArray(plugin.inject))
   assert.equal(typeof plugin.apply, 'function')

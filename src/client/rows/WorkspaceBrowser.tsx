@@ -17,8 +17,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCloseFill14, IconPersonalizationOutline16,
-  IconPlusOutline16, IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
+  Button, IconCloseFillRegular, IconPersonalizationOutlineRegular,
+  IconPlusOutlineRegular, IconProjectAddOutlineRegular, IconSearchOutlineRegular, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -28,8 +28,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SessionNode, SessionOrderBy, TreeSection } from '../tree.ts'
 import {
-  arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, mainSessionId, owningGroupKey, planWorkspaceMove,
-  repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
+  activeScheduleSessionIds, arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, mainSessionId,
+  owningGroupKey, planWorkspaceMove, repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
 } from '../tree.ts'
 import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
@@ -215,7 +215,7 @@ function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
             aria-label={t('viewOptions.label')}
             onClick={() => { setOpen(v => !v) }}
           >
-            <IconPersonalizationOutline16 />
+            <IconPersonalizationOutlineRegular />
           </button>
         </Tooltip>
       )}
@@ -301,6 +301,8 @@ type SessionTreeProps = Pick<
   onSessionRename: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Archive a session (row menu action; the row disappears on the state echo). */
   onSessionArchive: (sessionId: SessionNode['id']) => void
+  /** Sessions whose Host reminder catalog entry is active (row clock mark). */
+  activeSchedules: ReadonlySet<SessionId>
   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
   orderBy: SessionOrderBy
   /** One Session chosen from search that must be exposed and scrolled into view. */
@@ -314,7 +316,7 @@ function SessionTree({
   useSessions, useSessionStatus, startSession, open, forkSession, workspaces, archivedSessionIds,
   workspaceReady, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
-  insertWorkspaceBefore, insertSessionBefore, orderBy,
+  insertWorkspaceBefore, insertSessionBefore, orderBy, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, snapshot, worktrees,
@@ -393,13 +395,13 @@ function SessionTree({
     [sessionOrderByAccount, ungroupedSessionIds],
   )
   const groups = useMemo(
-    () => deriveGroups(list, orderedWorkspaces, archivedSessionIds, statuses, {
+    () => deriveGroups(list, orderedWorkspaces, archivedSessionIds, statuses, activeSchedules, {
       expandedGroups,
       ...(sessionOrderByAccount[UNGROUPED_KEY] === undefined
         ? {}
         : { ungroupedOrder: sessionOrderByAccount[UNGROUPED_KEY] }),
     }),
-    [list, orderedWorkspaces, archivedSessionIds, statuses, expandedGroups, sessionOrderByAccount],
+    [list, orderedWorkspaces, archivedSessionIds, statuses, activeSchedules, expandedGroups, sessionOrderByAccount],
   )
   const sections = useMemo(
     () => arrangeSections(groups, snapshot, groupExpansion),
@@ -866,7 +868,7 @@ function FlatList({
   useSessions, useSessionStatus, open, forkSession, onSessionRename, onSessionArchive,
   archivedSessionIds, usePanelInfo,
   orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder,
-  revealSessionId, onSessionRevealed, t,
+  activeSchedules, revealSessionId, onSessionRevealed, t,
 }: Pick<
   SessionTreeProps,
   | 'useSessions'
@@ -884,14 +886,15 @@ function FlatList({
   | 'setSessionOrder'
   | 'revealSessionId'
   | 'onSessionRevealed'
+  | 'activeSchedules'
   | 't'
 >) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
   const statuses = useSessionStatus(s => s)
   const baseRows = useMemo(
-    () => deriveFlat(list, archivedSessionIds, statuses),
-    [list, archivedSessionIds, statuses],
+    () => deriveFlat(list, archivedSessionIds, statuses, activeSchedules),
+    [list, archivedSessionIds, statuses, activeSchedules],
   )
   const sessionIds = useMemo(() => baseRows.map(row => row.id), [baseRows])
   const previousOrderBy = useRef(orderBy)
@@ -1009,6 +1012,7 @@ function SearchResults({
   query,
   remote,
   resultLimit,
+  activeSchedules,
   usePanelInfo,
   t,
 }: Pick<SessionTreeProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
@@ -1017,6 +1021,7 @@ function SearchResults({
   query: string
   remote: RemoteSearchState
   resultLimit: number
+  activeSchedules: ReadonlySet<SessionId>
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
@@ -1031,10 +1036,11 @@ function SearchResults({
       query,
       archivedSessionIds,
       statuses,
+      activeSchedules,
       currentRemote,
       resultLimit,
     ),
-    [list, workspaces, query, archivedSessionIds, statuses, currentRemote, resultLimit],
+    [list, workspaces, query, archivedSessionIds, statuses, activeSchedules, currentRemote, resultLimit],
   )
   const pending = currentRemote.status === 'loading'
   const failed = currentRemote.status === 'error'
@@ -1102,6 +1108,7 @@ export function WorkspaceBrowser({
   searchResultLimit,
   useHostInfo,
   useWorktrees,
+  useScheduleCatalog,
   pickDirectory,
   worktrees,
   t,
@@ -1112,6 +1119,8 @@ export function WorkspaceBrowser({
   const workspaceStreamState = useWorkspaces(state => state.state)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
   const snapshot = useWorktrees(state => state)
+  const scheduleCatalog = useScheduleCatalog(entries => entries)
+  const activeSchedules = useMemo(() => activeScheduleSessionIds(scheduleCatalog), [scheduleCatalog])
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
   const groupExpansion = useStore(s => s.groupExpansion)
@@ -1472,7 +1481,7 @@ export function WorkspaceBrowser({
                     setSearchExpanded(true)
                   }}
                 >
-                  <IconSearchOutline16 size={searchExpanded ? 11 : 14} />
+                  <IconSearchOutlineRegular size={searchExpanded ? 11 : 14} />
                 </button>
               </Tooltip>
               <input
@@ -1501,7 +1510,7 @@ export function WorkspaceBrowser({
                     setSearchExpanded(false)
                   }}
                 >
-                  <IconCloseFill14 />
+                  <IconCloseFillRegular />
                 </button>
               )}
             </div>
@@ -1516,7 +1525,7 @@ export function WorkspaceBrowser({
                 aria-label={t('area.add')}
                 onClick={() => { setAreaDraft(''); setAreaDialog({ mode: 'create' }) }}
               >
-                <IconPlusOutline16 />
+                <IconPlusOutlineRegular />
               </button>
             </Tooltip>
           )}
@@ -1539,7 +1548,7 @@ export function WorkspaceBrowser({
               disabled={addBusy}
               onClick={addWorkspace}
             >
-              <IconProjectAddOutline16 size={wide ? 16 : 18} />
+              <IconProjectAddOutlineRegular size={wide ? 16 : 18} />
             </button>
           </Tooltip>
         </div>
@@ -1558,7 +1567,7 @@ export function WorkspaceBrowser({
               expandSidebar()
             }}
           >
-            <IconSearchOutline16 size={18} />
+            <IconSearchOutlineRegular size={18} />
           </button>
         </Tooltip>
       </div>}
@@ -1578,6 +1587,7 @@ export function WorkspaceBrowser({
               query={normalizedQuery}
               remote={remoteSearch}
               resultLimit={searchResultLimit}
+              activeSchedules={activeSchedules}
               t={t}
             />
           )
@@ -1594,6 +1604,7 @@ export function WorkspaceBrowser({
                 sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
                 syncSessionOrderAccount={actions.syncSessionOrderAccount}
                 setSessionOrder={actions.setSessionOrder}
+                activeSchedules={activeSchedules}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
                 t={t}
@@ -1616,6 +1627,7 @@ export function WorkspaceBrowser({
                 syncSessionOrderAccount={actions.syncSessionOrderAccount}
                 setSessionOrder={actions.setSessionOrder}
                 archivedSessionIds={archivedSessionIds}
+                activeSchedules={activeSchedules}
                 startSession={startSession}
                 open={open}
                 insertWorkspaceBefore={insertWorkspaceBefore}

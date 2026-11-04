@@ -1,18 +1,22 @@
 import { existsSync } from 'node:fs'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const bundledDsh = '/Applications/DSH Desktop Beta.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js'
 const runtimeRoot = await mkdtemp(join(tmpdir(), 'dsh-left-panel-demo-'))
 const profileName = 'left-panel-demo'
 
+// Use Desktop's shipped launcher: plain Node cannot load its CLI from app.asar.
+const desktopCli = ['/Applications', join(homedir(), 'Applications')]
+  .map(root => join(root, 'DeepSeek Harness.app', 'Contents', 'Resources', 'runtime', 'cli', 'bin', 'dsh'))
+  .find(launcher => existsSync(launcher))
+
 function dshCommand(args) {
   if (process.env.DSH_BIN) return { command: process.env.DSH_BIN, args }
-  if (existsSync(bundledDsh)) return { command: process.execPath, args: [bundledDsh, ...args] }
+  if (desktopCli !== undefined) return { command: desktopCli, args }
   return { command: 'dsh', args }
 }
 
@@ -92,9 +96,20 @@ async function seed(baseUrl, paths) {
 
 let server
 let cleanupPromise
+
+/** Stop the demo server and wait for it to exit, so the runtime directory is not removed under a live host. */
+function stopServer() {
+  if (server === undefined || server.exitCode !== null || server.signalCode !== null) return Promise.resolve()
+  const exited = new Promise(resolve => server.once('exit', resolve))
+  server.kill('SIGTERM')
+  const force = setTimeout(() => server.kill('SIGKILL'), 5_000)
+  force.unref()
+  return exited.finally(() => clearTimeout(force))
+}
+
 function cleanup() {
   cleanupPromise ??= (async () => {
-    server?.kill('SIGTERM')
+    await stopServer()
     await rm(runtimeRoot, { recursive: true, force: true })
   })()
   return cleanupPromise
@@ -114,7 +129,7 @@ try {
     const timeout = setTimeout(() => reject(new Error('DSH startup timed out')), 20_000)
     const inspect = (chunk) => {
       const text = chunk.toString()
-      const match = text.match(/https?:\/\/127\.0\.0\.1:\d+\/\?token=[^\s]+/)
+      const match = text.match(/https?:\/\/[^\s\u001b]+\?token=[^\s\u001b]+/)
       if (!match) return
       clearTimeout(timeout)
       resolve(match[0])

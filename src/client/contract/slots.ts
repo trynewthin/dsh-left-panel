@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { SessionSearchResultItem } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { createWorkspaceViewStore } from '../stores.ts'
 import type { WorktreeSnapshot } from '../../protocol.ts'
@@ -56,6 +57,12 @@ export type WorkspaceBrowserInjected = {
     hostInfo: HostObservable<RemoteHostFacts>
     /** Repositories and their worktrees as the host last observed them. */
     worktrees: HostObservable<WorktreeSnapshot>
+    /**
+     * Host-wide reminder catalog. DSH 0.2 exposes active reminders here, not
+     * through a Session list projection; the row clock mark filters it by
+     * Session and `status === 'active'`.
+     */
+    scheduleCatalog: HostObservable<readonly ScheduleCatalogEntry[]>
   }
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and

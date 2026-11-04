@@ -13,7 +13,7 @@ import {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
-import type {} from '@deepseek-ai/dsh-schedule/client'
+import type { ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import type { RepoInfo, WorktreeSnapshot } from '../protocol.ts'
@@ -69,7 +69,7 @@ export interface SessionNode {
   runningSubagentCount: number
   /** Finished running while not selected and not yet opened (the green "done" reminder dot). */
   completed: boolean
-  /** The current list projection contains at least one active Schedule record. */
+  /** The Host reminder catalog holds at least one active Schedule record for this Session. */
   hasActiveSchedule: boolean
   updatedAt: number
 }
@@ -108,7 +108,7 @@ export interface SearchResultNode {
   runningSubagentCount: number
   /** Finished running while not selected and not yet opened (the green "done" reminder dot). */
   completed: boolean
-  /** The current list projection contains at least one active Schedule record. */
+  /** The Host reminder catalog holds at least one active Schedule record for this Session. */
   hasActiveSchedule: boolean
   snippet?: string
 }
@@ -174,9 +174,22 @@ function sessionTitle(session: SessionSummary): string {
   return session.blank ? '' : session.displayTitle
 }
 
-/** The list projection alone owns the best-effort active-Schedule indicator. */
-function hasActiveSchedule(session: SessionSummary): boolean {
-  return (session.projectionValues?.schedule?.length ?? 0) > 0
+/**
+ * Project the Host reminder catalog onto the Sessions that own at least one
+ * active task. `schedule/catalog` carries active and ended tasks for every
+ * Session, so the indicator reads this one catalog instead of a Session
+ * projection (DSH 0.2 no longer projects Schedule records into list rows).
+ * @param entries - the whole Host reminder catalog.
+ * @returns the Session ids with at least one active reminder.
+ */
+export function activeScheduleSessionIds(
+  entries: readonly ScheduleCatalogEntry[],
+): ReadonlySet<SessionId> {
+  const active = new Set<SessionId>()
+  for (const entry of entries) {
+    if (entry.status === 'active') active.add(entry.sessionId)
+  }
+  return active
 }
 
 /** Build one group without projecting session lineage into presentation. */
@@ -277,6 +290,7 @@ function sessionNode(
   s: SessionSummary,
   descendants: ReadonlyMap<SessionId, SubagentDescendantSummary>,
   statuses: SessionStatuses,
+  activeSchedules: ReadonlySet<SessionId>,
 ): SessionNode {
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
@@ -287,7 +301,7 @@ function sessionNode(
     running: status?.running ?? s.running,
     runningSubagentCount: descendants.get(s.id)?.runningCount ?? 0,
     completed: status?.completionUnread === true,
-    hasActiveSchedule: hasActiveSchedule(s),
+    hasActiveSchedule: activeSchedules.has(s.id),
     updatedAt: s.updatedAt,
     ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
   }
@@ -305,6 +319,7 @@ function sessionNode(
  * @param workspaces - real workspaces in stable Host order.
  * @param archivedSessionIds - registry-global archive set.
  * @param statuses - unified UI status by Session.
+ * @param activeSchedules - Sessions whose Host reminder catalog entry is active.
  * @param view - local expansion arrays.
  * @returns group sections in render order.
  */
@@ -313,6 +328,7 @@ export function deriveGroups(
   workspaces: readonly WorkspaceView[],
   archivedSessionIds: readonly SessionId[],
   statuses: SessionStatuses,
+  activeSchedules: ReadonlySet<SessionId>,
   view: TreeView,
 ): GroupNode[] {
   const archived = new Set(archivedSessionIds)
@@ -335,7 +351,7 @@ export function deriveGroups(
       expanded,
       containsCurrent: g.key === currentGroup,
       sessions: expanded
-        ? g.sessions.map(session => sessionNode(session, descendants, statuses))
+        ? g.sessions.map(session => sessionNode(session, descendants, statuses, activeSchedules))
         : [],
     })
   }
@@ -350,12 +366,14 @@ export function deriveGroups(
  * @param list - sessions list snapshot.
  * @param archivedSessionIds - registry-global archive set.
  * @param statuses - unified UI status by Session.
+ * @param activeSchedules - Sessions whose Host reminder catalog entry is active.
  * @returns flat rows in render order.
  */
 export function deriveFlat(
   list: SessionListState,
   archivedSessionIds: readonly SessionId[],
   statuses: SessionStatuses,
+  activeSchedules: ReadonlySet<SessionId>,
 ): SessionNode[] {
   const archived = new Set(archivedSessionIds)
   const current = mainSessionId(list)
@@ -367,7 +385,7 @@ export function deriveFlat(
     rows.push(s)
   }
   rows.sort(byRecency)
-  return rows.map(session => sessionNode(session, descendants, statuses))
+  return rows.map(session => sessionNode(session, descendants, statuses, activeSchedules))
 }
 
 /**
@@ -379,6 +397,7 @@ export function deriveFlat(
  * @param query - caller text; surrounding whitespace is ignored.
  * @param archivedSessionIds - registry-global archive set (members never match).
  * @param statuses - unified UI status by Session.
+ * @param activeSchedules - Sessions whose Host reminder catalog entry is active.
  * @param content - ranked Host content-search page.
  * @param limit - protocol-owned maximum merged row count.
  * @returns bounded deduplicated flat rows and a refine-query hint bit.
@@ -389,6 +408,7 @@ export function deriveSearchResults(
   query: string,
   archivedSessionIds: readonly SessionId[],
   statuses: SessionStatuses,
+  activeSchedules: ReadonlySet<SessionId>,
   content: { items: readonly SessionSearchResultItem[]; hasMore: boolean },
   limit: number,
 ): SearchResultSet {
@@ -454,7 +474,7 @@ export function deriveSearchResults(
           ? {}
           : { pendingInteraction }),
         completed: status?.completionUnread === true,
-        hasActiveSchedule: hasActiveSchedule(summary),
+        hasActiveSchedule: activeSchedules.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }
     }),

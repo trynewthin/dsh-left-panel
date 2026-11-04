@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Button, IconBranchOutline16, IconFolderClose16, IconPlusOutline16,
-  IconTriangleRightFill14, Menu, Modal,
+  Button, IconBranchOutlineRegular, IconFolderCloseRegular, IconPlusOutlineRegular,
+  IconTriangleRightFillRegular, Menu, Modal,
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -46,7 +46,7 @@ export function GroupedWorkspacePicker({
         label: (
           <span className={css.projectLabel}>
             <span className={css.projectName}>{entry.name}</span>
-            <IconTriangleRightFill14 className={expanded ? css.projectArrowExpanded : css.projectArrow} />
+            <IconTriangleRightFillRegular className={expanded ? css.projectArrowExpanded : css.projectArrow} />
           </span>
         ),
       }
@@ -56,14 +56,14 @@ export function GroupedWorkspacePicker({
       label: entry.nested
         ? <span className={css.nestedLabel}>{entry.workspace.title}</span>
         : entry.workspace.title,
-      icon: entry.nested ? <IconBranchOutline16 size={16} /> : <IconFolderClose16 size={16} />,
+      icon: entry.nested ? <IconBranchOutlineRegular size={16} /> : <IconFolderCloseRegular size={16} />,
       disabled: busy,
     }
     })
   const addEntries: MenuEntry[] = [{
     id: ADD_WORKSPACE,
     label: t('picker.addWorkspace'),
-    icon: <IconPlusOutline16 size={16} />,
+    icon: <IconPlusOutlineRegular size={16} />,
     disabled: busy,
   }]
   const chooseDirectory = (): void => {
