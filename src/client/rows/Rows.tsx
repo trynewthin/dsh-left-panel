@@ -6,17 +6,17 @@
 /**
  * Workspace browser tree row components (figma Cell set 14:3080): pure presentational —
  * all data and callbacks arrive via props. Hover swaps (folder->chevron,
- * time->ellipsis, action buttons) are CSS-only. Row ... menus are visual-only
- * except workspace Rename/Delete and session Rename/Fork/Archive; the session
+ * time->ellipsis, action buttons) are CSS-only. Menus expose workspace
+ * rename/delete, branch-path copy and session rename/fork/archive; the session
  * and workspace hover cards are suppressed while a menu is open.
  */
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard, IconAlarmClockOutlineRegular, IconArchiveOutlineRegular, IconBranchOutlineRegular,
-  IconEditOutlineRegular, IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
+  IconCopyOutlineRegular, IconEditOutlineRegular, IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
   IconPlusOutlineRegular, IconRefreshOutlineRegular, IconTrashOutlineRegular, IconTriangleRightFillRegular, Menu,
-  relativeTime, StateDot,
+  relativeTime, StateDot, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
@@ -236,6 +236,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    ...(nested && row.cwd !== undefined ? [
+      { id: 'copy-path', label: t('menu.copyAbsolutePath'), icon: <IconCopyOutlineRegular /> },
+    ] : []),
     ...(actions?.delete === undefined ? [] : [
       { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
     ]),
@@ -276,12 +279,13 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
             items={workspaceMenuItems}
             onSelect={(id) => {
               setMenuOpen(false)
-              // Unknown ids leave before the dispatch: a future menu row must
-              // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
+              if (id === 'copy-path' && nested && row.cwd !== undefined) {
+                void writeClipboard(row.cwd).then((copied) => {
+                  if (!copied) console.warn('left-panel: could not copy the worktree path to the clipboard')
+                })
+              }
               if (id === 'rename') actions.rename()
-              else actions.delete?.()
+              if (id === 'delete') actions.delete?.()
             }}
             portal
             closeOnPointerLeave
