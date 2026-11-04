@@ -19,8 +19,10 @@ export interface WorktreeActions {
   setRepoName(repoKey: string, name: string): Promise<void>
   /** Rename a worktree Workspace; title conflicts are scoped to its repository. */
   setWorkspaceTitle(workspaceId: string, title: string): Promise<void>
-  /** Remove only a Workspace registration and retain a restorable tombstone. */
+  /** Remove any Workspace registration — ordinary directory or worktree — and retain a restorable tombstone. */
   deleteWorkspace(workspaceId: string): Promise<void>
+  /** Remove every registered Workspace of one repository, tombstoning its worktrees first. */
+  deleteRepository(repoKey: string): Promise<void>
   /** Re-register a tombstoned worktree path and reattach its sessions. */
   restoreWorkspace(path: string): Promise<void>
 }
@@ -72,6 +74,7 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
       setRepoName: (repoKey, name) => call('setRepoName', { repoKey, name }),
       setWorkspaceTitle: (workspaceId, title) => call('setWorkspaceTitle', { workspaceId, title }),
       deleteWorkspace: workspaceId => call('deleteWorkspace', { workspaceId }),
+      deleteRepository: repoKey => call('deleteRepository', { repoKey }),
       restoreWorkspace: path => call('restoreWorkspace', { path }),
     },
     start() {

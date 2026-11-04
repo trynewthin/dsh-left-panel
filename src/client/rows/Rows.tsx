@@ -27,9 +27,9 @@ import css from './Rows.module.css'
 /** The standard locale seat, prop-passed from the browser root. */
 type RowTranslate = WorkspaceBrowserProps['t']
 
-/** Row display title: blank rows show the localized New Session label. */
+/** Only unnamed blank rows use the localized New Session placeholder. */
 function displayTitle(node: SessionNode, t: RowTranslate): string {
-  return node.blank ? t('session.new') : node.title
+  return node.blank && node.title === '' ? t('session.new') : node.title
 }
 
 /** Localized compact relative time ("刚刚"/"5分钟" in zh, "now"/"5min" in en). */
@@ -357,11 +357,12 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore, drag, home, t }: {
+export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, onRestore, drag, home, t }: {
   section: RepoSection
   onToggle: () => void
   onRefresh: () => void
   onRename: () => void
+  onDelete: () => void
   onRestore: (path: string) => void
   /** Present when the node can be reordered among the other sections. */
   drag?: WorkspaceRowDragProps | undefined
@@ -380,6 +381,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
   const menuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
     { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutlineRegular /> },
+    { id: 'delete', label: t('delete.repository'), icon: <IconTrashOutlineRegular />, danger: true },
     ...(deletedBranchItems.length === 0 ? [] : [{
       id: 'deleted-branches',
       label: t('repo.menu.deletedBranches'),
@@ -421,6 +423,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onRestore,
             setMenuOpen(false)
             if (id === 'rename') onRename()
             if (id === 'refresh') onRefresh()
+            if (id === 'delete') onDelete()
             if (id.startsWith('restore:')) onRestore(id.slice('restore:'.length))
           }}
           portal
@@ -551,6 +554,51 @@ function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number;
   )
 }
 
+/** Every listed Session has registration-safe actions, including blank Sessions. */
+function SessionMenu({ id, title, blank = false, open, setOpen, onRename, onFork, onArchive, t }: {
+  id: SessionNode['id']
+  title: string
+  blank?: boolean
+  open: boolean
+  setOpen: (open: boolean) => void
+  onRename: (id: SessionNode['id'], title: string) => void
+  onFork: (id: SessionNode['id']) => void
+  onArchive: (id: SessionNode['id']) => void
+  t: RowTranslate
+}) {
+  return (
+    <span className={css.rowActions}>
+      <Menu
+        open={open}
+        onClose={() => { setOpen(false) }}
+        items={[
+          { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+          ...(blank ? [] : [{ id: 'fork', label: t('menu.fork'), icon: <IconBranchOutlineRegular /> }]),
+          { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutlineRegular size={16} /> },
+        ]}
+        onSelect={(action) => {
+          setOpen(false)
+          if (action === 'rename') onRename(id, title)
+          if (action === 'fork') onFork(id)
+          if (action === 'archive') onArchive(id)
+        }}
+        portal
+        closeOnPointerLeave
+        anchor={(
+          <button
+            type="button"
+            className={css.iconButton}
+            aria-label={t('actions.session.aria', { name: title || t('session.new') })}
+            onClick={(event) => { event.stopPropagation(); setOpen(!open) }}
+          >
+            <IconEllipsisOutlineRegular />
+          </button>
+        )}
+      />
+    </span>
+  )
+}
+
 /**
  * One flat search result: title, Workspace context, and optional content
  * excerpt. Search navigation opens the session only; it does not address an
@@ -559,23 +607,32 @@ function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number;
  * @param props.currentId - selected session id.
  * @param props.onOpen - open the selected session.
  * @param props.t - Workspace-browser translation seat.
- * @returns the result button.
+ * @returns the result row with its own session actions.
  */
-export function SearchResultItem({ result, currentId, onOpen, t }: {
+export function SearchResultItem({ result, currentId, onOpen, onRename, onFork, onArchive, t }: {
   result: SearchResultNode
   currentId: string | undefined
   onOpen: (id: SearchResultNode['id']) => void
+  onRename: (id: SessionNode['id'], title: string) => void
+  onFork: (id: SessionNode['id']) => void
+  onArchive: (id: SessionNode['id']) => void
   t: RowTranslate
 }) {
   const selected = result.id === currentId
   const statuses = sessionStatuses(result, t)
   const primaryStatus = statuses[0]
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
-    <button
-      type="button"
-      className={clsx(css.searchResultRow, selected && css.selected)}
+    <div
+      className={clsx(css.searchResultRow, selected && css.selected, menuOpen && css.menuOpen)}
       role="treeitem"
       aria-selected={selected}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onOpen(result.id)
+      }}
       onClick={() => { onOpen(result.id) }}
     >
       <span className={css.searchResultHeading}>
@@ -586,6 +643,10 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
         </span>
         <span className={css.searchResultTitle}>{result.title}</span>
         {result.hasActiveSchedule && <ActiveScheduleIndicator t={t} search />}
+        <SessionMenu
+          id={result.id} title={result.title} blank={result.blank} open={menuOpen} setOpen={setMenuOpen}
+          onRename={onRename} onFork={onFork} onArchive={onArchive} t={t}
+        />
       </span>
       <span className={css.searchResultMeta}>
         <span className={css.searchResultWorkspace}>{result.workspace || t('group.ungrouped')}</span>
@@ -593,7 +654,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
           <span className={css.searchResultSnippet}>{result.snippet}</span>
         )}
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -647,15 +708,6 @@ export function SessionNodeItem({
     rowRef.current?.scrollIntoView({ block: 'nearest' })
     onReveal()
   }, [onReveal])
-  // Archive hides the row through the registry-global archive set and never
-  // touches the session log, so it is not styled as destructive and needs no
-  // confirmation dialog.
-  const sessionMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
-    { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutlineRegular /> },
-    // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
-    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutlineRegular size={16} /> },
-  ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
     <div
@@ -703,38 +755,12 @@ export function SessionNodeItem({
       )}
       <span className={css.title}>{title}</span>
       {row.hasActiveSchedule && <ActiveScheduleIndicator t={t} />}
-      {/* A blank New Session row is a provisional placeholder: nothing has
-          happened in it yet, so a "now" timestamp and the row verbs
-          (rename/fork/archive) would all act on content that does not
-          exist — both trailing cells stay off until the first prompt. */}
+      {/* A blank Session has no activity timestamp or fork prefix yet. */}
       {!row.blank && <span className={css.time}>{timeLabel(row.updatedAt, now, t)}</span>}
-      {!row.blank && (
-        <span className={css.rowActions}>
-          <Menu
-            open={menuOpen}
-            onClose={() => { setMenuOpen(false) }}
-            items={sessionMenuItems}
-            onSelect={(id) => {
-              setMenuOpen(false)
-              if (id === 'rename') onRename(node.id, row.title)
-              if (id === 'fork') onFork(node.id)
-              if (id === 'archive') onArchive(node.id)
-            }}
-            portal
-            closeOnPointerLeave
-            anchor={(
-              <button
-                type="button"
-                className={css.iconButton}
-                aria-label={t('actions.session.aria', { name: title })}
-                onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v) }}
-              >
-                <IconEllipsisOutlineRegular />
-              </button>
-            )}
-          />
-        </span>
-      )}
+      <SessionMenu
+        id={row.id} title={row.title} blank={row.blank} open={menuOpen} setOpen={setMenuOpen}
+        onRename={onRename} onFork={onFork} onArchive={onArchive} t={t}
+      />
     </div>
   )
   return (

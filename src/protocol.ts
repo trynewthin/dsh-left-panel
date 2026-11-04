@@ -25,13 +25,18 @@ export const ENDPOINT_PREFIX = 'left-panel'
  * - `sync`: reconcile now, then answer (the browser's Refresh action).
  * - `setRepoName`: set the repository's display name; an empty name restores the derived one.
  * - `setWorkspaceTitle`: rename one worktree Workspace, with conflicts scoped to its repository.
- * - `deleteWorkspace`: remove only a linked-worktree Workspace record and retain a tombstone.
+ * - `deleteWorkspace`: remove any Workspace record — an ordinary directory or any worktree of a
+ *   scanned repository, the main worktree included — while retaining its directory and sessions;
+ *   a worktree path also keeps a durable tombstone so reconciliation cannot recreate it. Adding the
+ *   directory back by hand clears only that path's tombstone.
+ * - `deleteRepository`: remove every registered Workspace of one repository in a single operation,
+ *   tombstoning all of its scanned worktrees first.
  * - `restoreWorkspace`: clear that tombstone and register the unchanged worktree directory again.
  */
-export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle' | 'deleteWorkspace' | 'restoreWorkspace'
+export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle' | 'deleteWorkspace' | 'deleteRepository' | 'restoreWorkspace'
 
 export const ENDPOINTS: readonly Endpoint[] = [
-  'list', 'sync', 'setRepoName', 'setWorkspaceTitle', 'deleteWorkspace', 'restoreWorkspace',
+  'list', 'sync', 'setRepoName', 'setWorkspaceTitle', 'deleteWorkspace', 'deleteRepository', 'restoreWorkspace',
 ]
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */

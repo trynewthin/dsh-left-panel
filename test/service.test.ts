@@ -1,8 +1,9 @@
 /**
  * Drives the host service against a real temporary git repository through a
  * fake Workspace registry and a fake connection, covering the full
- * discover → register → retitle → remove → ignore → un-ignore cycle and the
- * RPC surface the browser half calls.
+ * discover → register → retitle → remove → ignore → un-ignore cycle, explicit
+ * removal of ordinary/main/whole-repository registrations, and the RPC surface
+ * the browser half calls.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -211,6 +212,7 @@ test('worktree sync end to end against a real repository', async (t) => {
   await git(root, 'init', '-q', '-b', 'main', repo)
   await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init')
   const featPath = join(root, 'wt-feat')
+  const threePath = join(root, 'wt-three')
   await git(repo, 'worktree', 'add', '-q', '-b', 'feat/x', featPath)
 
   const registry = new FakeRegistry([
@@ -368,8 +370,9 @@ test('worktree sync end to end against a real repository', async (t) => {
     // The plugin has no per-repository switches and no manual registration:
     // reconciliation is continuous and the browser only reads or refreshes.
     assert.deepEqual(harness.routePaths().sort(), [
-      '/api/left-panel/deleteWorkspace', '/api/left-panel/list', '/api/left-panel/restoreWorkspace',
-      '/api/left-panel/setRepoName', '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
+      '/api/left-panel/deleteRepository', '/api/left-panel/deleteWorkspace', '/api/left-panel/list',
+      '/api/left-panel/restoreWorkspace', '/api/left-panel/setRepoName',
+      '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
     ])
     assert.equal(harness.service.snapshot().repos.length, 1)
   })
@@ -397,5 +400,116 @@ test('worktree sync end to end against a real repository', async (t) => {
     const snapshot = await harness.rpc('sync')
     assert.equal(snapshot.repos.length, 1)
     assert.ok(await registry.resolveByPath(plain))
+  })
+
+  await t.test('removes an ordinary directory Workspace, keeping its files and skipping a tombstone', async () => {
+    const plainPath = join(root, 'plain')
+    const plain = await registry.resolveByPath(plainPath)
+    assert.ok(plain)
+    const removed = await harness.rpc('deleteWorkspace', { workspaceId: plain.id })
+    assert.equal(registry.get(plain.id), undefined, 'registration removed')
+    assert.equal(await realpath(plainPath), plainPath, 'directory retained')
+    assert.deepEqual(removed.repos.flatMap(repo => repo.deletedWorktrees ?? []), [], 'no worktree tombstone')
+    assert.deepEqual((await loadState(join(root, 'state.json'))).state.deletedWorktrees, [])
+    await harness.service.syncNow()
+    await harness.service.syncNow()
+    assert.equal(await registry.resolveByPath(plainPath), undefined, 'not re-registered')
+    assert.equal(registry.sessions.length, 2, 'session logs untouched')
+  })
+
+  await t.test('removes the main worktree record without recreating it and keeps the linked one', async () => {
+    const removed = await harness.rpc('deleteWorkspace', { workspaceId: main.id })
+    assert.equal(registry.get(main.id), undefined, 'main registration removed')
+    assert.equal(await realpath(repo), repo, 'main worktree directory retained')
+    const repoInfo = removed.repos[0]
+    assert.ok(repoInfo)
+    assert.equal(repoInfo.worktrees.find(worktree => worktree.main)?.workspaceId, null)
+    assert.deepEqual(repoInfo.deletedWorktrees?.map(entry => [entry.path, entry.branch, entry.title]), [
+      [repo, 'main', 'repo'],
+    ])
+    const feat = await registry.resolveByPath(featPath)
+    assert.ok(feat, 'linked worktree record untouched')
+    await harness.service.syncNow()
+    await harness.service.syncNow()
+    assert.equal(await registry.resolveByPath(repo), undefined, 'main worktree is not auto-registered again')
+    assert.equal(await realpath(repo), repo)
+    assert.ok(registry.get(feat.id), 'linked worktree still managed')
+    assert.equal((await loadState(join(root, 'state.json'))).state.ignored.includes(repo), true)
+    assert.equal(registry.sessions.length, 2, 'session logs untouched')
+  })
+
+  await t.test('rejects unknown deletion targets with structured errors', async () => {
+    await assert.rejects(harness.rpc('deleteWorkspace', {}), /bad-request/)
+    await assert.rejects(harness.rpc('deleteWorkspace', { workspaceId: 'ws-missing' }), /unknown-workspace/)
+    await assert.rejects(harness.rpc('deleteRepository', {}), /bad-request/)
+    await assert.rejects(harness.rpc('deleteRepository', { repoKey: '/nope/.git' }), /unknown-repository/)
+  })
+
+  await t.test('removes a whole repository and never resurrects its worktrees', async () => {
+    await git(repo, 'worktree', 'add', '-q', '-b', 'three', threePath)
+    await harness.service.syncNow()
+    const repoKey = harness.service.snapshot().repos[0]?.key
+    assert.ok(repoKey)
+    const feat = await registry.resolveByPath(featPath)
+    const three = await registry.resolveByPath(threePath)
+    assert.ok(feat)
+    assert.ok(three)
+
+    const removed = await harness.rpc('deleteRepository', { repoKey })
+    assert.equal(removed.repos.length, 0, 'repository group gone from the fresh snapshot')
+    for (const path of [repo, featPath, threePath]) {
+      assert.equal(await registry.resolveByPath(path), undefined, `${path} unregistered`)
+      assert.equal(await realpath(path), path, 'worktree directory retained')
+    }
+    assert.equal(registry.sessions.length, 2, 'session logs untouched')
+    const persisted = await loadState(join(root, 'state.json'))
+    for (const path of [repo, featPath, threePath]) {
+      assert.equal(persisted.state.ignored.includes(path), true, `${path} tombstoned`)
+    }
+    assert.deepEqual(
+      persisted.state.deletedWorktrees.map(entry => [entry.branch, entry.title]).sort(),
+      [['feat/z', 'My branch'], ['main', 'repo'], ['three', 'three']].sort(),
+      'every worktree of the repository stays restorable with its own metadata',
+    )
+
+    await harness.service.syncNow()
+    await harness.service.syncNow()
+    for (const path of [repo, featPath, threePath]) {
+      assert.equal(await registry.resolveByPath(path), undefined, 'no resurrection after repeated sync')
+      assert.equal((await loadState(join(root, 'state.json'))).state.ignored.includes(path), true, 'tombstone stays durable')
+    }
+    assert.equal(harness.service.snapshot().repos.length, 0)
+  })
+
+  await t.test('adding a removed path back natively clears only its own tombstone', async () => {
+    const feat = await registry.create(featPath, 'feat-back')
+    await harness.service.syncNow()
+    assert.ok(registry.get(feat.id), 'natively added Workspace kept')
+    const repoInfo = harness.service.snapshot().repos[0]
+    assert.ok(repoInfo, 'repository visible again through the re-added worktree')
+    assert.equal(repoInfo.worktrees.find(worktree => worktree.path === featPath)?.workspaceId, feat.id)
+    assert.deepEqual(
+      repoInfo.deletedWorktrees?.map(entry => entry.path).sort(),
+      [repo, threePath].sort(),
+      'the path is no longer listed as removed and its neighbours still are',
+    )
+    let persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(featPath), false, 'ignore lifted')
+    assert.equal(persisted.state.deletedWorktrees.some(entry => entry.path === featPath), false, 'tombstone lifted')
+    assert.equal(persisted.state.ignored.includes(repo), true, 'other tombstone preserved')
+    assert.equal(persisted.state.ignored.includes(threePath), true)
+
+    const mainAgain = await registry.create(repo, 'repo')
+    await harness.service.syncNow()
+    assert.ok(registry.get(mainAgain.id))
+    persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(repo), false, 'main worktree tombstone lifted too')
+    assert.equal(persisted.state.deletedWorktrees.some(entry => entry.path === repo), false)
+    assert.deepEqual(
+      harness.service.snapshot().repos[0]?.deletedWorktrees?.map(entry => entry.path),
+      [threePath],
+      'the untouched worktree stays removed',
+    )
+    assert.equal(persisted.state.ignored.includes(threePath), true)
   })
 })

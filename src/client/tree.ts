@@ -58,9 +58,9 @@ export function mainSessionId(list: SessionListState): SessionId | undefined {
 /** One top-level session row in a group or the flat list. */
 export interface SessionNode {
   id: SessionId
-  /** Stored display title; the renderer substitutes the localized New Session label for blank rows. */
+  /** Stored title; named blank rows keep the user's rename, unnamed blank rows render the localized New Session label. */
   title: string
-  /** The provisional blank session (renderer shows the localized New Session title). */
+  /** The provisional blank session (renderer shows the localized New Session title until the user renames it). */
   blank: boolean
   /** A Session-scoped UI consumer is awaiting this user. */
   pendingInteraction?: SessionPendingInteractionStatus
@@ -100,6 +100,8 @@ export interface GroupNode {
 export interface SearchResultNode {
   id: SessionId
   title: string
+  /** The Session still has no turn (a named New Session): row actions must omit fork. */
+  blank: boolean
   workspace: string
   /** A Session-scoped UI consumer is awaiting this user. */
   pendingInteraction?: SessionPendingInteractionStatus
@@ -154,24 +156,31 @@ function byRecency(a: SessionSummary, b: SessionSummary): number {
 }
 
 /**
- * Ordinary sessions are visible; among blank sessions, only the current one
- * is visible. Subagent children use their parent header catalog; archived
- * sessions are visible nowhere, while their accounting slots remain so
- * unarchiving restores position.
+ * Ordinary sessions are visible; among blank sessions, the current one and
+ * any explicitly named blank stay visible (a rename is a durable user label,
+ * so hiding it on selection change would lose the row). Subagent children use
+ * their parent header catalog; archived sessions are visible nowhere, while
+ * their accounting slots remain so unarchiving restores position.
  */
 function sessionVisible(session: SessionSummary, current: SessionId | undefined, archived: ReadonlySet<SessionId>): boolean {
   return session.origin !== 'subagent'
     && !archived.has(session.id)
-    && (!session.blank || session.id === current)
+    && (!session.blank || session.id === current || isNamedBlank(session))
 }
 
 /**
- * A blank session is the selected Workspace's provisional New Session row;
- * its canonical title never enters search (blank rows are query-excluded)
- * and the renderer localizes its display label.
+ * A blank session is the selected Workspace's provisional New Session row and
+ * its renderer label is localized, so only a user-assigned title is exposed;
+ * unnamed blank rows keep the empty title.
  */
 function sessionTitle(session: SessionSummary): string {
-  return session.blank ? '' : session.displayTitle
+  if (!session.blank) return session.displayTitle
+  return session.title?.trim() ?? ''
+}
+
+/** A blank Session owns a durable user-assigned title (rename before the first prompt). */
+function isNamedBlank(session: SessionSummary): boolean {
+  return session.blank && sessionTitle(session) !== ''
 }
 
 /**
@@ -311,8 +320,9 @@ function sessionNode(
  * Derive the workspace browser groups with every session as a top-level row.
  *
  * Every group shows; sessions populate under expanded groups in the selected
- * local order. Blank sessions are excluded except for the selected
- * provisional New Session row; archived sessions are excluded everywhere.
+ * local order. Unnamed blank sessions are excluded except for the selected
+ * provisional New Session row, while renamed blank sessions stay visible;
+ * archived sessions are excluded everywhere.
  * Content search lives outside this derivation
  * (see {@link deriveSearchResults}).
  * @param list - sessions list snapshot (`current` feeds containsCurrent).
@@ -434,9 +444,14 @@ export function deriveSearchResults(
   const local: SessionSummary[] = []
   for (const id of list.ids) {
     const summary = list.byId[id]
-    // Blank placeholders never match a query (their canonical title displays
-    // localized, so matching it would tie search to one language).
-    if (summary === undefined || summary.blank || !sessionVisible(summary, current, archived)) continue
+    // Unnamed blank placeholders never match a query (their canonical title
+    // displays localized, so matching it would tie search to one language).
+    // A renamed blank carries a durable user title and stays searchable.
+    if (
+      summary === undefined
+      || !sessionVisible(summary, current, archived)
+      || (summary.blank && !isNamedBlank(summary))
+    ) continue
     if (
       sessionTitle(summary).toLowerCase().includes(q)
       || labelOf(summary).toLowerCase().includes(q)
@@ -456,7 +471,11 @@ export function deriveSearchResults(
   for (const summary of local) include(summary)
   for (const item of content.items) {
     const summary = list.byId[item.sessionId]
-    if (summary !== undefined && !summary.blank && sessionVisible(summary, current, archived)) include(summary)
+    if (
+      summary !== undefined
+      && sessionVisible(summary, current, archived)
+      && (!summary.blank || isNamedBlank(summary))
+    ) include(summary)
   }
 
   return {
@@ -467,6 +486,7 @@ export function deriveSearchResults(
       return {
         id: summary.id,
         title: sessionTitle(summary),
+        blank: summary.blank,
         workspace: labelOf(summary),
         running: status?.running ?? summary.running,
         runningSubagentCount: descendants.get(summary.id)?.runningCount ?? 0,

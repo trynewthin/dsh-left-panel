@@ -61,7 +61,7 @@ function collapsedSessionRows(sessions: readonly SessionNode[]): {
 } {
   let ordinaryCount = 0
   const rows = sessions.filter((session) => {
-    if (session.blank) return true
+    if (session.blank && session.title === '') return true
     if (ordinaryCount >= COLLAPSED_SESSION_LIMIT) return false
     ordinaryCount += 1
     return true
@@ -297,6 +297,8 @@ type SessionTreeProps = Pick<
   onProjectAreaOrderChange: (areaIds: string[]) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
+  /** Remove every Workspace registration under one repository after confirmation. */
+  onRepoDeleteRequest: (repoKey: string, title: string, workspaceIds: readonly WorkspaceId[]) => void
   /** Open the browser-owned session rename dialog. */
   onSessionRename: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Archive a session (row menu action; the row disappears on the state echo). */
@@ -315,7 +317,7 @@ type SessionTreeProps = Pick<
 function SessionTree({
   useSessions, useSessionStatus, startSession, open, forkSession, workspaces, archivedSessionIds,
   workspaceReady, usePanelInfo,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
+  onRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
   insertWorkspaceBefore, insertSessionBefore, orderBy, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -514,9 +516,6 @@ function SessionTree({
   /** One Workspace group: header row + expanded top-level session rows. */
   const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
     const workspaceId = group.workspaceId
-    const deletable = nested && repoKey !== undefined && snapshot.repos
-      .find(repo => repo.key === repoKey)?.worktrees
-      .some(worktree => worktree.workspaceId === workspaceId && !worktree.main) === true
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
     const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
@@ -607,9 +606,7 @@ function SessionTree({
               rename: () => {
                 if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
               },
-              ...(deletable
-                ? { delete: () => { onDeleteRequest(group.workspaceId as WorkspaceId, group.label) } }
-                : {}),
+              delete: () => { onDeleteRequest(group.workspaceId as WorkspaceId, group.label) },
             }}
         />
         {(sessionsExpanded
@@ -758,6 +755,7 @@ function SessionTree({
           onToggle={() => { setGroupExpanded(section.key, !section.expanded) }}
           onRefresh={() => { worktrees.refresh().catch(warnRejected('worktree refresh')) }}
           onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
+          onDelete={() => { onRepoDeleteRequest(section.repo.key, section.repo.name, section.workspaceIds as readonly WorkspaceId[]) }}
           onRestore={(path) => { worktrees.restoreWorkspace(path).catch(warnRejected('workspace restore')) }}
         />
         {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
@@ -858,7 +856,6 @@ function SessionTree({
             </>
           )}
       </div>
-      <span className={css.fade} />
     </div>
   )
 }
@@ -990,7 +987,6 @@ function FlatList({
           )
         })}
       </div>
-      <span className={css.fade} />
     </div>
   )
 }
@@ -1007,6 +1003,9 @@ function SearchResults({
   useSessions,
   useSessionStatus,
   open,
+  onSessionRename,
+  forkSession,
+  onSessionArchive,
   workspaces,
   archivedSessionIds,
   query,
@@ -1015,7 +1014,7 @@ function SearchResults({
   activeSchedules,
   usePanelInfo,
   t,
-}: Pick<SessionTreeProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
+}: Pick<SessionTreeProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'onSessionRename' | 'forkSession' | 'onSessionArchive'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
   query: string
@@ -1055,6 +1054,9 @@ function SearchResults({
               result={result}
               currentId={panelActive ? undefined : mainSessionId(list)}
               onOpen={open}
+              onRename={onSessionRename}
+              onFork={forkSession}
+              onArchive={onSessionArchive}
               t={t}
             />
           ))}
@@ -1076,7 +1078,6 @@ function SearchResults({
           </div>
         )}
       </div>
-      <span className={css.fade} />
     </div>
   )
 }
@@ -1420,17 +1421,21 @@ export function WorkspaceBrowser({
 
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
-  const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'workspace'; workspaceId: WorkspaceId; title: string }
+    | { kind: 'repository'; repoKey: string; workspaceIds: readonly WorkspaceId[]; title: string }
+    | null
+  >(null)
   const [deleting, setDeleting] = useState(false)
-  const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
+  const [deleteCommittedIds, setDeleteCommittedIds] = useState<readonly WorkspaceId[] | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   useEffect(() => {
-    if (deleteCommittedId === null
-      || workspaces.some(workspace => workspace.workspaceId === deleteCommittedId)) return
+    if (deleteCommittedIds === null
+      || workspaces.some(workspace => deleteCommittedIds.includes(workspace.workspaceId))) return
     setDeleting(false)
-    setDeleteCommittedId(null)
+    setDeleteCommittedIds(null)
     setDeleteTarget(null)
-  }, [deleteCommittedId, workspaces])
+  }, [deleteCommittedIds, workspaces])
   const closeDelete = () => {
     if (deleting) return
     setDeleteTarget(null)
@@ -1440,13 +1445,15 @@ export function WorkspaceBrowser({
     /* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
     if (deleting || deleteTarget === null) return
     setDeleting(true)
-    setDeleteCommittedId(null)
+    setDeleteCommittedIds(null)
     setDeleteError(null)
-    worktrees.deleteWorkspace(deleteTarget.workspaceId).then(() => {
-      // Keep the confirmation pending until this component has rendered the
-      // committed list projection without the deleted id. Closing earlier
-      // exposes one stale React frame to the next Create Workspace gesture.
-      setDeleteCommittedId(deleteTarget.workspaceId)
+    const target = deleteTarget
+    const removal = target.kind === 'repository'
+      ? worktrees.deleteRepository(target.repoKey)
+      : worktrees.deleteWorkspace(target.workspaceId)
+    removal.then(() => {
+      // Wait until the official Workspace stream acknowledges every removal.
+      setDeleteCommittedIds(target.kind === 'repository' ? target.workspaceIds : [target.workspaceId])
     }).catch((reason: unknown) => {
       setDeleting(false)
       setDeleteError(reason instanceof Error ? reason.message : String(reason))
@@ -1582,6 +1589,9 @@ export function WorkspaceBrowser({
               useSessions={useSessions}
               useSessionStatus={useSessionStatus}
               open={openSearchResult}
+              onSessionRename={onSessionRename}
+              forkSession={forkSession}
+              onSessionArchive={onSessionArchive}
               workspaces={workspaces}
               archivedSessionIds={archivedSessionIds}
               query={normalizedQuery}
@@ -1653,7 +1663,11 @@ export function WorkspaceBrowser({
                   setRenameError(null)
                 }}
                 onDeleteRequest={(workspaceId, title) => {
-                  setDeleteTarget({ workspaceId, title })
+                  setDeleteTarget({ kind: 'workspace', workspaceId, title })
+                  setDeleteError(null)
+                }}
+                onRepoDeleteRequest={(repoKey, title, workspaceIds) => {
+                  setDeleteTarget({ kind: 'repository', repoKey, title, workspaceIds })
                   setDeleteError(null)
                 }}
                 onRepoRenameRequest={(repoKey, currentName) => {
@@ -1801,10 +1815,10 @@ export function WorkspaceBrowser({
         open={deleteTarget !== null}
         onClose={closeDelete}
         closeLabel={t('close')}
-        title={t('delete.workspace')}
+        title={t(deleteTarget?.kind === 'repository' ? 'delete.repository' : 'delete.workspace')}
         {...deleteTarget === null
           ? {}
-          : { description: t('delete.desc', { name: deleteTarget.title }) }}
+          : { description: t(deleteTarget.kind === 'repository' ? 'delete.repository.desc' : 'delete.desc', { name: deleteTarget.title }) }}
         footer={(
           <>
             <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
@@ -1814,7 +1828,7 @@ export function WorkspaceBrowser({
               disabled={deleting}
               onClick={confirmDelete}
             >
-              {t('delete.workspace')}
+              {t(deleteTarget?.kind === 'repository' ? 'delete.repository' : 'delete.workspace')}
             </Button>
           </>
         )}

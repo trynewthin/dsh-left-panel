@@ -2,8 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  arrangeSections, planWorkspaceMove, repoGroupKey, workspaceDropAllowed, type GroupNode,
+  arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, planWorkspaceMove,
+  repoGroupKey, workspaceDropAllowed, type GroupNode,
 } from '../src/client/tree.ts'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RepoInfo, WorktreeInfo, WorktreeSnapshot } from '../src/protocol.ts'
 
 function group(workspaceId: string, label: string, cwd: string, containsCurrent = false): GroupNode {
@@ -178,4 +182,72 @@ test('dropping after a repository targets the end of all its worktrees', () => {
     planWorkspaceMove(order, ['c1'], { ids: ['a1', 'a2'], half: 'after' }),
     { ids: ['c1'], anchor: 'b1' },
   )
+})
+
+function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
+  return {
+    id: id as SessionId,
+    displayTitle: id,
+    running: false,
+    retainedBy: {},
+    blank: false,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+function sessionState(sessions: readonly SessionSummary[]): SessionListState {
+  return {
+    ids: sessions.map(entry => entry.id),
+    byId: Object.fromEntries(sessions.map(entry => [entry.id, entry])),
+    phase: 'ready',
+    projectionsBySession: {},
+  }
+}
+
+function workspaceView(id: string, sessionIds: readonly SessionId[]): WorkspaceView {
+  return {
+    workspaceId: id as WorkspaceView['workspaceId'],
+    path: `/tmp/${id}`,
+    title: id,
+    sessionIds,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  }
+}
+
+test('a renamed blank Session stays visible with its title after selection moves', () => {
+  const ordinary = session('ordinary', { displayTitle: 'Existing work', retainedBy: { mainView: 1 } })
+  const named = session('named', { blank: true, title: 'Draft label' })
+  const unnamed = session('unnamed', { blank: true, title: '' })
+  const list = sessionState([ordinary, named, unnamed])
+  const workspaces = [workspaceView('ws', list.ids)]
+
+  const groups = deriveGroups(list, workspaces, [], new Map(), new Set(), { expandedGroups: ['ws'] })
+  assert.deepEqual(groups[0]?.sessions.map(row => row.id), ['ordinary', 'named'])
+  const namedRow = groups[0]?.sessions.find(row => row.id === 'named')
+  assert.equal(namedRow?.title, 'Draft label')
+  assert.equal(namedRow?.blank, true, 'the row still has no turn, so its menu must omit fork')
+
+  // The flat list follows the same visibility contract.
+  assert.deepEqual(deriveFlat(list, [], new Map(), new Set()).map(row => row.id), ['named', 'ordinary'])
+
+  // A named blank is searchable by its durable title; unnamed blanks remain excluded.
+  const namedHits = deriveSearchResults(
+    list, workspaces, 'draft', [], new Map(), new Set(), { items: [], hasMore: false }, 10,
+  )
+  assert.deepEqual(namedHits.items.map(row => row.id), ['named'])
+  assert.equal(namedHits.items[0]?.blank, true)
+  const unnamedHits = deriveSearchResults(
+    list, workspaces, 'unnamed', [], new Map(), new Set(), { items: [], hasMore: false }, 10,
+  )
+  assert.deepEqual(unnamedHits.items, [])
+})
+
+test('the selected unnamed blank Session keeps its localized placeholder title', () => {
+  const current = session('current', { blank: true, title: '', retainedBy: { mainView: 1 } })
+  const list = sessionState([current])
+  const groups = deriveGroups(list, [workspaceView('ws', list.ids)], [], new Map(), new Set(), { expandedGroups: ['ws'] })
+  assert.deepEqual(groups[0]?.sessions.map(row => row.id), ['current'])
+  assert.equal(groups[0]?.sessions[0]?.title, '', 'the renderer localizes the placeholder label')
 })

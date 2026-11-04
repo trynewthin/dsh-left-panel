@@ -103,6 +103,12 @@ export class WorktreeSyncService {
   private readonly watchers = new Map<string, FSWatcher[]>()
   private readonly selfDeletes = new Set<string>()
   /**
+   * Worktree paths whose explicit removal is still running, with the number of
+   * routes holding them. Their tombstones must never be lifted as a "native
+   * re-add" while the Workspace record happens to still exist.
+   */
+  private readonly deletePending = new Map<string, number>()
+  /**
    * Tombstones that apply immediately, before their durable write lands: a
    * deletion the user just performed must not render as "not registered" for
    * the moment between the registry change and the state-file write.
@@ -308,8 +314,7 @@ export class WorktreeSyncService {
   private async apply(plan: SyncPlan, state: PersistedState): Promise<void> {
     const known = new Map(plan.knownWorktrees)
     const titles: Record<string, string> = { ...state.autoTitles }
-    const deletedPaths = new Set(state.deletedWorktrees.map(entry => entry.path))
-    const released = new Set(plan.releaseIgnored.filter(path => !deletedPaths.has(path)))
+    const released = new Set(plan.releaseIgnored)
     // Sessions that were created by naming a directory rather than a Workspace
     // (another tool's launch, an explicit cwd) never entered any ledger, so
     // they sit under Ungrouped even though a Workspace now covers their
@@ -326,6 +331,12 @@ export class WorktreeSyncService {
     for (const action of plan.actions) {
       switch (action.type) {
         case 'create': {
+          // The plan was computed from an earlier scan; a delete that landed in
+          // the meantime must win over registering the worktree again.
+          if (this.ignoredPaths().has(action.path)) {
+            this.ctx.logger.info(`left-panel: not registering ${action.path}; it was removed explicitly`)
+            break
+          }
           try {
             const workspace = await this.ctx.workspaceRegistry.create(action.path, action.title)
             known.set(action.path, action.repoKey)
@@ -364,20 +375,31 @@ export class WorktreeSyncService {
       }
     }
     const registeredPaths = new Set(this.registry.map(workspace => workspace.path))
-    // Ordinary native re-registration lifts a legacy ignore. Explicitly deleted
-    // worktrees retain their tombstone until the restore endpoint removes it.
-    for (const path of [...this.ignoring]) {
-      if (registeredPaths.has(path) && !deletedPaths.has(path)) this.ignoring.delete(path)
-    }
+    // A tombstoned path that carries a registration again was re-added by the
+    // user: the plugin never recreates one. Drop every memory of that removal —
+    // otherwise the restored path would still show up as "removed" beside its
+    // active Worktree. Other removed worktrees keep their tombstones.
+    const tombstoned = new Set([...state.ignored, ...state.deletedWorktrees.map(entry => entry.path)])
+    const reAdded = new Set([...tombstoned].filter(path => registeredPaths.has(path)
+      && !this.deletePending.has(path)))
+    for (const path of reAdded) this.ignoring.delete(path)
     for (const path of Object.keys(titles)) if (!known.has(path)) delete titles[path]
-    const next: PersistedState = {
-      ...state,
-      ignored: state.ignored.filter(path => !released.has(path)
-        && (!registeredPaths.has(path) || deletedPaths.has(path))),
-      knownWorktrees: Object.fromEntries(known),
-      autoTitles: titles,
-    }
-    if (!sameState(state, next)) await this.store.update(() => next)
+    // The plan was built from a state snapshot; another route (an explicit
+    // delete) may have written a tombstone since. Merge into the state that is
+    // current when this mutation actually runs, and never release a path that is
+    // tombstoned there.
+    await this.store.update((current) => {
+      const currentDeleted = new Set(current.deletedWorktrees.map(entry => entry.path))
+      const next: PersistedState = {
+        ...current,
+        ignored: current.ignored.filter(path => !reAdded.has(path)
+          && (!released.has(path) || currentDeleted.has(path))),
+        deletedWorktrees: current.deletedWorktrees.filter(entry => !reAdded.has(entry.path)),
+        knownWorktrees: Object.fromEntries(known),
+        autoTitles: titles,
+      }
+      return sameState(current, next) ? current : next
+    })
   }
 
   /** Registered Workspace id per scanned worktree path, for adoption and placement. */
@@ -483,6 +505,40 @@ export class WorktreeSyncService {
     return this.repos.some(repo => repo.worktrees.some(worktree => worktree.path === path))
   }
 
+  /** Hold (and later release) the re-add lift for paths an explicit delete owns right now. */
+  private holdDelete(paths: Iterable<string>): void {
+    for (const path of paths) this.deletePending.set(path, (this.deletePending.get(path) ?? 0) + 1)
+  }
+
+  private releaseDelete(paths: Iterable<string>): void {
+    for (const path of paths) {
+      const held = this.deletePending.get(path)
+      if (held === undefined) continue
+      if (held <= 1) this.deletePending.delete(path)
+      else this.deletePending.set(path, held - 1)
+    }
+  }
+
+  /**
+   * Persist deletion memory before any registry change. Every path is ignored
+   * at once — in memory first, then on disk — so a reconcile that is already
+   * running cannot recreate it, and each one stays listed as restorable.
+   */
+  private async tombstone(deleted: readonly DeletedWorktree[]): Promise<void> {
+    if (deleted.length === 0) return
+    for (const entry of deleted) this.ignoring.add(entry.path)
+    const restorable = new Set(deleted.map(entry => entry.path))
+    await this.store.update((state) => {
+      const ignored = [...state.ignored]
+      for (const path of restorable) if (!ignored.includes(path)) ignored.push(path)
+      return {
+        ...state,
+        ignored,
+        deletedWorktrees: [...state.deletedWorktrees.filter(entry => !restorable.has(entry.path)), ...deleted],
+      }
+    })
+  }
+
   private async handle(endpoint: string, payload: unknown): Promise<ConnectionRpcResult<unknown>> {
     try {
       switch (endpoint) {
@@ -535,28 +591,101 @@ export class WorktreeSyncService {
           if (workspaceId === undefined) return fail('left-panel/bad-request', 'deleteWorkspace requires workspaceId')
           const workspace = this.ctx.workspaceRegistry.get(workspaceId as WorkspaceId)
           if (workspace === undefined) return fail('left-panel/unknown-workspace', `${workspaceId} is not a registered Workspace`, { workspaceId })
+          // Any Workspace record may go: an ordinary directory has nothing that
+          // could recreate it, while every worktree — the main one included —
+          // keeps a tombstone so reconciliation leaves it unregistered.
           const repo = this.repos.find(candidate => candidate.worktrees.some(worktree => worktree.path === workspace.path))
           const worktree = repo?.worktrees.find(candidate => candidate.path === workspace.path)
-          if (repo === undefined || worktree === undefined) {
-            return fail('left-panel/not-worktree', `${workspaceId} is not part of a scanned repository`, { workspaceId })
+          const repoKey = repo?.key ?? this.store.current.knownWorktrees[workspace.path]
+          this.holdDelete([workspace.path])
+          try {
+            if (repoKey !== undefined) {
+              await this.tombstone([{
+                repoKey,
+                path: workspace.path,
+                branch: worktree?.branch ?? null,
+                title: workspace.title,
+              }])
+            }
+            this.rememberSelfDelete(workspaceId)
+            await this.ctx.workspaceRegistry.delete(workspaceId as WorkspaceId)
+            await this.syncNow()
+          } finally {
+            this.releaseDelete([workspace.path])
           }
-          if (worktree.main) return fail('left-panel/main-worktree', 'The main worktree Workspace record cannot be deleted', { workspaceId })
-          const deleted: DeletedWorktree = {
-            repoKey: repo.key,
-            path: worktree.path,
-            branch: worktree.branch,
-            title: workspace.title,
-          }
-          await this.store.update(state => ({
-            ...state,
-            ignored: state.ignored.includes(deleted.path) ? state.ignored : [...state.ignored, deleted.path],
-            deletedWorktrees: [...state.deletedWorktrees.filter(entry => entry.path !== deleted.path), deleted],
-          }))
-          this.ignoring.add(deleted.path)
-          this.rememberSelfDelete(workspaceId)
-          await this.ctx.workspaceRegistry.delete(workspaceId as WorkspaceId)
-          await this.syncNow()
           return ok(this.snapshot())
+        }
+        case 'deleteRepository': {
+          const repoKey = stringField(payload, 'repoKey')
+          if (repoKey === undefined) return fail('left-panel/bad-request', 'deleteRepository requires repoKey')
+          const repo = this.repos.find(candidate => candidate.key === repoKey)
+          const failed = this.failedRepos.get(repoKey)
+          if (repo === undefined && failed === undefined) {
+            return fail('left-panel/unknown-repository', `${repoKey} is not a scanned repository`, { repoKey })
+          }
+          // Everything git lists, plus every path the plugin has ever seen in
+          // this repository (a Worktree that vanished a moment ago can still own
+          // a Workspace record), and a failed scan's main path.
+          const scanned = new Map<string, ScannedWorktree>()
+          for (const worktree of repo?.worktrees ?? []) if (!worktree.bare) scanned.set(worktree.path, worktree)
+          const paths = new Set(scanned.keys())
+          for (const [path, key] of Object.entries(this.store.current.knownWorktrees)) {
+            if (key === repoKey) paths.add(path)
+          }
+          if (failed !== undefined) paths.add(failed.mainPath)
+          const members = this.ctx.workspaceRegistry.list().filter(workspace => paths.has(workspace.path))
+          const workspaceByPath = new Map(members.map(workspace => [workspace.path, workspace]))
+          const state = this.store.current
+          const deleted: DeletedWorktree[] = [...paths].map((path) => {
+            const worktree = scanned.get(path)
+            const workspace = workspaceByPath.get(path)
+            const existing = state.deletedWorktrees.find(entry => entry.path === path)
+            return {
+              repoKey,
+              path,
+              branch: worktree?.branch ?? existing?.branch ?? null,
+              title: workspace?.title
+                ?? existing?.title
+                ?? (worktree === undefined ? basename(path) || path : worktreeTitle(worktree)),
+            }
+          })
+          this.holdDelete(paths)
+          try {
+            await this.tombstone(deleted)
+            const removeMembers = async (): Promise<void> => {
+              const targets = this.ctx.workspaceRegistry.list().filter(workspace => paths.has(workspace.path))
+              // Mark first: the domain listener must not mistake these clears for
+              // the user deleting a Worktree by hand.
+              for (const workspace of targets) this.rememberSelfDelete(workspace.id)
+              for (const workspace of targets) {
+                try {
+                  await this.ctx.workspaceRegistry.delete(workspace.id as WorkspaceId)
+                  this.ctx.logger.info(`left-panel: unregistered ${workspace.path} (repository removed)`)
+                } catch (error) {
+                  this.ctx.logger.warn(`left-panel: could not unregister ${workspace.path}: ${String(error)}`)
+                }
+              }
+            }
+            await removeMembers()
+            // Drain reconciles already in flight; their creates see the tombstones
+            // and are skipped, but one that had already called the registry can
+            // still land, so sweep what is left and drain once more.
+            await this.syncNow()
+            if (this.ctx.workspaceRegistry.list().some(workspace => paths.has(workspace.path))) {
+              await removeMembers()
+              await this.syncNow()
+            }
+            const remaining = this.ctx.workspaceRegistry.list().filter(workspace => paths.has(workspace.path))
+            if (remaining.length > 0) {
+              return fail('left-panel/internal', `could not remove every Worktree of ${repoKey}`, {
+                repoKey,
+                workspaceIds: remaining.map(workspace => workspace.id),
+              })
+            }
+            return ok(this.snapshot())
+          } finally {
+            this.releaseDelete(paths)
+          }
         }
         case 'restoreWorkspace': {
           const path = stringField(payload, 'path')

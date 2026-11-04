@@ -128,7 +128,8 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.searchResultRow.selected {
+.searchResultRow.selected,
+.searchResultRow.menuOpen {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
@@ -136,6 +137,13 @@
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+/* Trailing menu closes the heading line; margin pushes it past the title and
+   the padding keeps the glyph clear of the compressed title. */
+.searchResultHeading > .rowActions {
+  margin-left: auto;
+  padding-left: 6px;
 }
 
 .searchResultTitle {
@@ -327,13 +335,23 @@
 }
 
 .projectRow:hover .rowActions,
+.projectRow:focus .rowActions,
+.projectRow:focus-within .rowActions,
 .sessionRow:hover .rowActions,
+.sessionRow:focus .rowActions,
+.sessionRow:focus-within .rowActions,
+.searchResultRow:hover .rowActions,
+.searchResultRow:focus .rowActions,
+.searchResultRow:focus-within .rowActions,
 .projectRow.menuOpen .rowActions,
-.sessionRow.menuOpen .rowActions {
+.sessionRow.menuOpen .rowActions,
+.searchResultRow.menuOpen .rowActions {
   display: inline-flex;
 }
 
 .sessionRow:hover .time,
+.sessionRow:focus .time,
+.sessionRow:focus-within .time,
 .sessionRow.menuOpen .time {
   display: none;
 }
