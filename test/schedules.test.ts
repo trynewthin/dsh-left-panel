@@ -27,7 +27,7 @@ interface FakeCatalog {
   reset(): void
 }
 
-/** One active reminder bound to `sessionId`; branding is irrelevant to the source. */
+/** One active reminder delivering to `sessionId`; branding is irrelevant to the source. */
 function entry(sessionId: string): ScheduleCatalogEntry {
   return {
     id: `id-${sessionId}`,
@@ -36,7 +36,8 @@ function entry(sessionId: string): ScheduleCatalogEntry {
     prompt: sessionId,
     afterSeconds: 60,
     scheduledAt: '2026-01-01T00:00:00Z',
-    sessionId,
+    target: { kind: 'session', sessionId },
+    involvedSessionIds: [sessionId],
     status: 'active',
   } as unknown as ScheduleCatalogEntry
 }
@@ -118,11 +119,11 @@ test('a connection reset discards the previous host read still in flight', async
   assert.equal(fake.reads.length, 2, 'a reset starts a fresh read')
   fake.resolveRead(1, active([entry('new-host')]))
   await flush()
-  assert.deepEqual(client.source.getSnapshot().map(item => item.sessionId), ['new-host'])
+  assert.deepEqual(client.source.getSnapshot().map(item => item.target.kind === 'new' ? 'new' : item.target.sessionId), ['new-host'])
 
   fake.resolveRead(0, active([entry('old-host')]))
   await flush()
-  assert.deepEqual(client.source.getSnapshot().map(item => item.sessionId), ['new-host'], 'stale generation never publishes')
+  assert.deepEqual(client.source.getSnapshot().map(item => item.target.kind === 'new' ? 'new' : item.target.sessionId), ['new-host'], 'stale generation never publishes')
 
   unsubscribe()
   stop()
@@ -145,7 +146,7 @@ test('a catalog change arriving during a read queues exactly one follow-up read'
 
   fake.resolveRead(1, active([entry('second')]))
   await flush()
-  assert.deepEqual(client.source.getSnapshot().map(item => item.sessionId), ['second'])
+  assert.deepEqual(client.source.getSnapshot().map(item => item.target.kind === 'new' ? 'new' : item.target.sessionId), ['second'])
 
   unsubscribe()
   stop()
@@ -164,7 +165,7 @@ test('a failed refresh keeps the last successful rows instead of blanking the ma
   fake.changed()
   fake.resolveRead(1, { ok: false, error: { code: 'internal', message: 'offline' } })
   await flush()
-  assert.deepEqual(client.source.getSnapshot().map(item => item.sessionId), ['kept'])
+  assert.deepEqual(client.source.getSnapshot().map(item => item.target.kind === 'new' ? 'new' : item.target.sessionId), ['kept'])
 
   unsubscribe()
   stop()
@@ -188,11 +189,13 @@ test('disposal releases both listeners and suppresses a late read', async () => 
   unsubscribe()
 })
 
-test('only active catalog tasks mark their owning sessions', () => {
+test('only active tasks mark their delivery session', () => {
   const running = entry('active')
-  const ended = { ...entry('inactive'), status: 'inactive' as const }
+  const paused = { ...running, status: 'paused' as const }
+  const ended = { ...running, status: 'ended' as const }
+  const created = { ...running, target: { kind: 'new', create: {} } as const }
   assert.deepEqual(
-    [...activeScheduleSessionIds([running, { ...running, id: entry('duplicate').id }, ended])],
+    [...activeScheduleSessionIds([running, { ...running, id: entry('duplicate').id }, paused, ended, created])],
     ['active'],
   )
 })

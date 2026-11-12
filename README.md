@@ -4,7 +4,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 ![dsh-left-panel 界面演示](https://raw.githubusercontent.com/trynewthin/dsh-left-panel/main/docs/ui-demo.png)
 
-当前版本 `0.2.8` 面向 **DSH `0.2.1-rc.5` / Cordis `4.0.5`**；不再兼容 `0.1.6-alpha.2`。依赖与锁文件已整体升级，发布包包含更新后的 Host / Web 构建产物。
+当前版本 `0.2.11` 面向 **DSH `0.2.2-rc.2` / Cordis `4.1.0`**。`engines.dsh` 使用范围 `>=0.2.2-rc.1 <0.3.0`，因此同系列补丁版本（含 `rc.2`）可直接加载，不再被精确版本锁拒绝。
 
 - **底层语义不变**：每个 worktree 就是一个真实的 DSH Workspace（会话 cwd = worktree 目录），会话、日志、归档行为与原生完全一致；本插件只做注册/注销与展示分组。
 - **自动同步是唯一行为**：向某个 git 仓库的任意工作树添加工作区后，插件扫描 `git worktree list`，把该仓库其余 worktree 自动注册为工作区（以分支名命名，detached 用短 hash）；worktree 被移除后自动注销（5 秒宽限，避免抖动）。主工作树永不自动注销。没有"自动/手动"开关，也不需要手动注册。
@@ -17,7 +17,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 - **新会话选择器**：新会话页的工作区菜单同样按「项目 → worktree」分组；项目可独立展开/收起，默认只展开当前工作区所属项目。普通工作区保持单行，添加工作区入口固定在底部。
 - **拖动排序**：项目节点、普通工作区行与项目内 worktree 子行都能拖动。项目节点拖动其名下整组工作区；worktree 子行只允许在所属项目内移动。两层顺序都复用 DSH 的同一条持久 Workspace 顺序，卸载插件后仍然成立。
 - **既有会话迁移**：注册某个 worktree 时，cwd 指向该目录的既有会话会被自动挂入这个新工作区（走官方 `attachSession`，cwd 校验由官方保证无法挂错）。因此你过去在没有该工作区时于 worktree 目录里创建、一直躺在"未分组"里的会话，安装后会直接出现在对应的 worktree 下——会话日志不动，只是归属到正确分组。
-- **保留既有交互**：客户端最初派生自官方 `@deepseek-ai/dsh-client-ui-workspace` 0.1.6-alpha.2（MIT），现已适配 0.2.1-rc.5 的图标、Remote 和会话导航接口；保留展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式。新版官方新增的行操作不会自动进入本插件的替换界面。
+- **保留既有交互**：客户端最初派生自官方 `@deepseek-ai/dsh-client-ui-workspace` 0.1.6-alpha.2（MIT），现已适配 0.2.2-rc.1 的图标、Remote、定时任务目标和会话导航接口；保留展开/折叠、搜索、会话打开、重命名/删除、fork、归档、拖拽排序、单列表模式。新版官方新增的行操作不会自动进入本插件的替换界面。
 - **会话菜单一致**：分组、单列表和搜索结果都提供右侧操作菜单。未发送消息的空白会话可重命名、归档，但不提供无内容可分叉的 fork；命名后的空白会话在切换会话后仍保留显示并可搜索。菜单支持悬停和键盘聚焦。
 
 ## 实现方式（遮蔽说明）
@@ -40,18 +40,18 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 
 以上行为在隔离 `DSH_HOME` 中用真实宿主实测过三阶段：装插件前在 worktree 目录建会话（落在未分组）→ 装插件后该会话被挂入 worktree 工作区 → 卸载后工作区、账本、会话日志全部保留。
 
-## 已验证（0.2.1-rc.5，真实宿主）
+## 已验证（0.2.2-rc.2，真实宿主）
 
 1. `pnpm typecheck`、`pnpm build`、`pnpm test` 全部通过，61 个测试覆盖同步、普通/主工作树/整项目移除与重新添加、命名空白会话的可见性和搜索、定时任务目录快照的异步生命周期。
-2. 隔离 `DSH_HOME` 启动本机 0.2.1-rc.5：注册主目录自动发现并注册两个 linked worktree；普通非 git 工作区保持独立。
-3. 真实 `git worktree add` / `remove` 后主动同步；新增工作区出现，删除工作树经 5 秒宽限后注销。
-4. 仓库/工作树重命名、删除墓碑、恢复注册均通过真实 RPC 验证；worktree 目录保留，注册前创建的会话已进入工作区账本。
-5. 插件 RPC 带 cookie 返回 200，无 cookie 返回 401，继续复用官方 `/api` 鉴权。
-6. 真实浏览器验证项目 → worktree 左侧分组、新会话工作区选择器、选择后导航与 fork 后自动打开子会话；未出现槽位异常。
-7. `node demo/dsh.mjs` 自动发现新版 Desktop 启动器，成功启动含两个仓库、五个 worktree 的隔离演示；`Ctrl+C` 后退出码为 0，临时数据已删除。
-8. 隔离原生 Desktop（`data-platform=darwin`）实测普通工作区删除、主工作树删除、整项目移除后确认框关闭且记录消失，目录与会话存储保留；空白会话重命名、搜索结果菜单及保留的重命名输入值正常。分组、单列表、搜索列表的 DOM 均没有底部遮罩节点，运行时未出现页面异常。
+2. 依赖与锁文件只解析 `0.2.2-rc.2` / Cordis `4.1.0`，不再残留旧版传递版本；插件管理器按 `engines.dsh` 范围接受当前补丁版本。
+3. 隔离 `DSH_HOME` 启动本机 0.2.2-rc.2：插件成功加载，注册主目录自动发现并注册 linked worktree；普通非 git 工作区保持独立。
+4. 真实 `git worktree add` / `remove` 后主动同步；新增工作区出现，删除工作树经 5 秒宽限后注销。
+5. 仓库/工作树重命名、删除墓碑、恢复注册均通过真实 RPC 验证；worktree 目录保留，注册前创建的会话已进入工作区账本。
+6. 插件 RPC 带 cookie 返回 200，无 cookie 返回 401，继续复用官方 `/api` 鉴权。
+7. 真实浏览器验证项目 → worktree 左侧分组、分支菜单（含“复制绝对路径”）正常渲染；分组、单列表和搜索列表均无底部遮罩节点。
+8. `node demo/dsh.mjs` 自动发现新版 Desktop 启动器，成功启动含两个仓库、五个 worktree 的隔离演示；`Ctrl+C` 后退出码为 0，临时数据已删除。
 
-新版定时任务标记从 Host 的 `schedule/catalog` 读取，跟随 `schedule/changed` 刷新；切换连接时先清空旧 Host 标记，不再读取已移除的 Session `schedule` projection。此轮验证了真实 catalog 读取与异步生命周期测试，未创建会实际执行的提醒。
+新版定时任务标记按官方语义读取 Host 的 `schedule/catalog`：只有 `active` 且目标为现有/预留 Session 的任务才标记对应会话，`new` 目标不标记列表行，`paused`、`ended` 也不标记。目录跟随 `schedule/changed` 刷新，切换连接时清空旧 Host 标记。此轮验证了真实 catalog 读取与异步生命周期测试，未创建会实际执行的提醒。
 
 ## 安装
 
@@ -60,7 +60,7 @@ DeepSeek Harness（DSH）Web 侧边栏的 git 多工作树（worktree）增强�
 dsh plugin --profile web add /abs/path/to/left-panel
 
 # 未全局安装 dsh CLI 时
-npx @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add /abs/path/to/left-panel
+npx @deepseek-ai/dsh@0.2.2-rc.2 plugin --profile web add /abs/path/to/left-panel
 ```
 
 Desktop 使用 `--profile desktop`。安装或首次加入 bundle 图后重启对应 DSH 实例；client 更新后浏览器硬刷新。没有全局 `dsh` 时，macOS 可使用 Desktop 自带命令：

@@ -184,19 +184,19 @@ function isNamedBlank(session: SessionSummary): boolean {
 }
 
 /**
- * Project the Host reminder catalog onto the Sessions that own at least one
- * active task. `schedule/catalog` carries active and ended tasks for every
- * Session, so the indicator reads this one catalog instead of a Session
- * projection (DSH 0.2 no longer projects Schedule records into list rows).
+ * Project the Host reminder catalog onto the Sessions that receive an active
+ * task. A `new` target creates its own Session at delivery time, so it marks
+ * no catalogued row; `session` and reserved `new_once` targets mark theirs.
  * @param entries - the whole Host reminder catalog.
- * @returns the Session ids with at least one active reminder.
+ * @returns the Session ids with at least one active delivery.
  */
 export function activeScheduleSessionIds(
   entries: readonly ScheduleCatalogEntry[],
 ): ReadonlySet<SessionId> {
   const active = new Set<SessionId>()
   for (const entry of entries) {
-    if (entry.status === 'active') active.add(entry.sessionId)
+    if (entry.status !== 'active' || entry.target.kind === 'new') continue
+    active.add(entry.target.sessionId)
   }
   return active
 }

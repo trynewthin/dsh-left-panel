@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Button, IconBranchOutlineRegular, IconFolderCloseRegular, IconPlusOutlineRegular,
   IconTriangleRightFillRegular, Menu, Modal,
@@ -24,7 +24,6 @@ export function GroupedWorkspacePicker({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set())
-  const getAnchorRect = useCallback(() => anchorRef?.current?.getBoundingClientRect() ?? null, [anchorRef])
   const allEntries = workspacePickerEntries(workspaces, snapshot)
   const selectedRepoKey = selectedId === undefined ? undefined : snapshot.workspaceRepo[selectedId as string]
   const selectedProjectId = selectedRepoKey === undefined ? undefined : `repo:${selectedRepoKey}`
@@ -100,7 +99,7 @@ export function GroupedWorkspacePicker({
         onClose={onClose}
         side="bottom"
         portal
-        getAnchorRect={getAnchorRect}
+        anchorRef={anchorRef}
       />
       <Modal
         open={error !== null}
