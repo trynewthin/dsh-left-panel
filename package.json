@@ -158,5 +158,10 @@
   "homepage": "https://github.com/trynewthin/dsh-left-panel#readme",
   "bugs": {
     "url": "https://github.com/trynewthin/dsh-left-panel/issues"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
