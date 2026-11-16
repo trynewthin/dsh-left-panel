@@ -423,12 +423,15 @@
 
 /* Optional tree guides (view option): each worktree section draws a rounded
    elbow from a vertical run at x15.5 — aligned under the project row's folder
-   icon (8px row padding + half of the 16px icon slot) — into its branch row.
-   ::before reaches 9px above the section so the first elbow meets the folder
-   icon and later elbows bridge the 2px sibling gap; ::after extends the run
-   2px past the bottom so the line never breaks between siblings. The last
-   sibling has no ::after, so its elbow is the closing └. The marker rules
-   below are .groupSection-qualified so they keep priority during drags. */
+   icon (8px row padding + half of the 16px icon slot) — into its branch icon
+   (row center y17, icon center x30). ::before owns the elbow itself and the
+   9px above the section so the first one meets the folder icon and later ones
+   bridge the 2px sibling gap; ::after continues the run below the elbow down
+   to 7px above the bottom, where the next sibling's ::before picks it up —
+   the two never overlap, so the translucent line keeps an even shade. The
+   last sibling has no ::after, so its elbow is the closing └. The marker
+   rules below are .groupSection-qualified so they keep priority during
+   drags. */
 .treeGuides .nestedSection {
   position: relative;
 }
@@ -438,8 +441,8 @@
   position: absolute;
   left: 15px;
   top: -9px;
-  width: 7px;
-  height: 24px;
+  width: 11px;
+  height: 26px;
   border-left: 1px solid var(--dsw-alias-border-l4);
   border-bottom: 1px solid var(--dsw-alias-border-l4);
   border-bottom-left-radius: 6px;
@@ -450,8 +453,8 @@
   content: '';
   position: absolute;
   left: 15px;
-  top: -9px;
-  bottom: -2px;
+  top: 16px;
+  bottom: 7px;
   border-left: 1px solid var(--dsw-alias-border-l4);
   pointer-events: none;
 }
