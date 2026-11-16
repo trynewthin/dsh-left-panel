@@ -441,11 +441,13 @@
   position: absolute;
   left: 15px;
   top: -9px;
-  width: 11px;
+  /* Ends at x21 — a few px shy of the branch icon's slot (x22) so the stub
+     points at it without touching it. */
+  width: 6px;
   height: 26px;
   border-left: 1px solid var(--dsw-alias-border-l4);
   border-bottom: 1px solid var(--dsw-alias-border-l4);
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: 4px;
   pointer-events: none;
 }
 
