@@ -1,0 +1,39 @@
+name: Release
+
+# Publishes to npm when a v* tag is pushed (npm version <x> creates the tag).
+# Auth uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret needed.
+# One-time setup: on npmjs.com, link this repo + workflow file as a trusted
+# publisher under the package's Settings → Publishing access.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC trusted publishing / provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing requires npm CLI >= 11.5.1
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - run: npm publish --provenance --access public
