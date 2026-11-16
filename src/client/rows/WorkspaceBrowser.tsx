@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Button, Checkbox, IconChevronsUpDownOutlineRegular, IconCloseFillRegular, IconPersonalizationOutlineRegular,
-  IconPlusOutlineRegular, IconProjectAddOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, Menu, Modal, Tooltip,
+  IconPlusOutlineRegular, IconProjectAddOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTriangleRightFillRegular, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -328,6 +328,10 @@ type SessionTreeProps = Pick<
   orderBy: SessionOrderBy
   /** Pin the derived running/pending/unread sessions above the section tree. */
   showActiveSessions: boolean
+  /** Fold the pinned active-sessions section down to its heading row. */
+  activeSessionsCollapsed: boolean
+  /** Toggle the pinned section's folded state. */
+  onActiveSessionsToggle: () => void
   /** One Session chosen from search that must be exposed and scrolled into view. */
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
@@ -342,7 +346,7 @@ function SessionTree({
   workspaceReady, usePanelInfo,
   onRenameRequest, onBranchRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
   onRepoCreateWorktree,
-  insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSchedules,
+  insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSessionsCollapsed, onActiveSessionsToggle, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, onSessionRevealRequest, snapshot, worktrees,
@@ -917,8 +921,24 @@ function SessionTree({
       >
         {activeSessions.length > 0 && (
           <div className={css.groupSection} role="group" aria-label={t('activeSessions.label')}>
-            <div className={css.activeHeader}>{t('activeSessions.label')}</div>
-            {activeSessions.map(node => (
+            <div
+              className={css.activeHeader}
+              role="button"
+              tabIndex={0}
+              aria-expanded={!activeSessionsCollapsed}
+              onClick={onActiveSessionsToggle}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                onActiveSessionsToggle()
+              }}
+            >
+              <span className={css.activeChevron}>
+                <IconTriangleRightFillRegular className={clsx(css.activeArrow, !activeSessionsCollapsed && css.activeArrowOpen)} />
+              </span>
+              <span className={css.activeHeaderName}>{t('activeSessions.label')}</span>
+            </div>
+            {!activeSessionsCollapsed && activeSessions.map(node => (
               <SessionNodeItem
                 key={node.id}
                 node={node}
@@ -1228,6 +1248,8 @@ export function WorkspaceBrowser({
   const orderBy = useStore(s => s.orderBy)
   // Old persisted v1 documents lack the toggle; absent reads as off.
   const showActiveSessions = useStore(s => s.showActiveSessions === true)
+  // Old persisted v1 documents lack the fold flag; absent reads as expanded.
+  const activeSessionsCollapsed = useStore(s => s.activeSessionsCollapsed === true)
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
@@ -1856,6 +1878,8 @@ export function WorkspaceBrowser({
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
                 showActiveSessions={showActiveSessions}
+                activeSessionsCollapsed={activeSessionsCollapsed}
+                onActiveSessionsToggle={() => { actions.setActiveSessionsCollapsed(!activeSessionsCollapsed) }}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
                 onSessionRevealRequest={setRevealSessionId}

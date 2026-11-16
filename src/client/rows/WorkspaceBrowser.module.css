@@ -353,14 +353,41 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* The pinned "active sessions" jump list leads the tree; its label matches
-   the project-area heading text style. */
+/* The pinned "active sessions" jump list leads the tree; its heading row
+   matches the project-area heading text style and folds on click. */
 .activeHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
   padding: 0 8px 0 3px;
   font-size: 14px;
   font-weight: 400;
-  line-height: 30px;
-  color: var(--dsw-alias-label-primary);
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.activeHeaderName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activeChevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.activeArrow {
+  transition: transform 150ms var(--ds-ease-in-out);
+}
+
+.activeArrowOpen {
+  transform: rotate(90deg);
 }
 
 /* One workspace section: header row + a compact expanded session run. */

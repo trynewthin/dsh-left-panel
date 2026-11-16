@@ -37,6 +37,8 @@ type WorkspaceViewState = {
   projectAreas: ProjectArea[]
   /** Pin a "活跃会话" section of running/pending/unread sessions at the top of the tree. */
   showActiveSessions: boolean
+  /** Fold the pinned active-sessions section down to its heading row. */
+  activeSessionsCollapsed: boolean
 }
 
 /**
@@ -47,6 +49,7 @@ type WorkspaceViewActions = {
   setGroupBy: (draft: WorkspaceViewState, mode: SessionGroupBy) => void
   setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy) => void
   setShowActiveSessions: (draft: WorkspaceViewState, show: boolean) => void
+  setActiveSessionsCollapsed: (draft: WorkspaceViewState, collapsed: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
   syncSessionOrderAccount: (
@@ -77,12 +80,14 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       sessionUpdatedAtByAccount: {},
       projectAreas: [],
       showActiveSessions: false,
+      activeSessionsCollapsed: false,
     }),
     persist: 'dsh-left-panel.workspace.view.v1',
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
       setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },
       setShowActiveSessions: (d, show: boolean) => { d.showActiveSessions = show },
+      setActiveSessionsCollapsed: (d, collapsed: boolean) => { d.activeSessionsCollapsed = collapsed },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys)
