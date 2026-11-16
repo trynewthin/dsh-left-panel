@@ -235,7 +235,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
   const active = group.expanded && group.containsCurrent
-  const status = groupPrimaryStatus(row, t)
+  // Expanded groups show per-session status on each row, so the aggregate
+  // dot is only rendered while folded.
+  const status = row.expanded ? undefined : groupPrimaryStatus(row, t)
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
     { id: 'rename', label: nested ? t('worktree.rename.display') : t('rename'), icon: <IconEditOutlineRegular /> },
