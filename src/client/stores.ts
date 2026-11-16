@@ -69,11 +69,36 @@ type WorkspaceViewActions = {
   setProjectAreaOrder: (draft: WorkspaceViewState, areaIds: string[]) => void
 }
 
+const PERSIST_V1 = 'dsh-left-panel.workspace.view.v1'
+const PERSIST_V2 = 'dsh-left-panel.workspace.view.v2'
+
+/**
+ * Carry the v1 persisted document forward: the persist key is the storage
+ * identity, so swapping keys wholesale would drop every user's section
+ * layout, expansion state and session order. The only intentional change is
+ * showActiveSessions, which v2 makes the default; everything else survives.
+ * Runs before defineStore so the engine hydrates from the migrated document.
+ */
+function migratePersistedView(): void {
+  try {
+    if (localStorage.getItem(PERSIST_V2) !== null) return
+    const raw = localStorage.getItem(PERSIST_V1)
+    if (raw === null) return
+    const doc = JSON.parse(raw) as Record<string, unknown>
+    doc.showActiveSessions = true
+    localStorage.setItem(PERSIST_V2, JSON.stringify(doc))
+    localStorage.removeItem(PERSIST_V1)
+  } catch {
+    // Unavailable or corrupt storage: hydrate fresh.
+  }
+}
+
 /**
  * Create the workspace browser viewing store handle.
  * @returns the store handle (spec + type + identity + factory in one).
  */
 export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState, WorkspaceViewActions> {
+  migratePersistedView()
   return defineStore({
     init: (): WorkspaceViewState => ({
       groupBy: 'workspace',
@@ -86,9 +111,10 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       activeSessionsCollapsed: false,
       treeGuides: false,
     }),
-    // v2: showActiveSessions defaults on and treeGuides is new; the key bump
-    // gives existing installs the new default instead of a stale persisted off.
-    persist: 'dsh-left-panel.workspace.view.v2',
+    // v2: showActiveSessions defaults on and treeGuides is new.
+    // migratePersistedView carries the v1 document forward so the key bump
+    // costs no persisted state.
+    persist: PERSIST_V2,
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
       setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },

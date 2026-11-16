@@ -45,6 +45,25 @@ const DEFAULT_POLL_MS = 30_000
 const DEFAULT_DEBOUNCE_MS = 400
 /** How long a self-issued delete stays recognizable in the change stream. */
 const SELF_DELETE_TTL_MS = 5_000
+
+/** Git/fan-out probes run a few at a time: parallel enough to stay fast,
+ * bounded so a large Workspace list cannot spawn-storm the host. */
+const SCAN_CONCURRENCY = 8
+
+/** Run `fn` over `items` with at most `limit` in flight, preserving order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next
+      next += 1
+      const item = items[index] as T
+      results[index] = await fn(item, index)
+    }
+  }))
+  return results
+}
 /** Upper bound on a user-given repository display name. */
 const REPO_NAME_MAX = 120
 
@@ -281,33 +300,47 @@ export class WorktreeSyncService {
   private async scan(): Promise<void> {
     const registry: RegisteredWorkspace[] = []
     const members = new Map<string, string[]>()
-    for (const workspace of this.ctx.workspaceRegistry.list()) {
+    const workspaces = this.ctx.workspaceRegistry.list()
+    for (const workspace of workspaces) {
       registry.push({ id: workspace.id, path: workspace.path, title: workspace.title })
-      if (!(await isDirectory(workspace.path))) continue
+    }
+    // Each probe is a stat plus a git spawn; running them serially made the
+    // first render crawl on long Workspace lists, so fan out with a bound.
+    const located = await mapLimit(workspaces, SCAN_CONCURRENCY, async (workspace) => {
+      if (!(await isDirectory(workspace.path))) return undefined
       const location = await locate(workspace.path)
-      if (location === null || !location.isRoot) continue
-      const list = members.get(location.commonDir)
-      if (list === undefined) members.set(location.commonDir, [workspace.path])
-      else list.push(workspace.path)
+      if (location === null || !location.isRoot) return undefined
+      return { path: workspace.path, commonDir: location.commonDir }
+    })
+    for (const entry of located) {
+      if (entry === undefined) continue
+      const list = members.get(entry.commonDir)
+      if (list === undefined) members.set(entry.commonDir, [entry.path])
+      else list.push(entry.path)
     }
     const repos: ScannedRepo[] = []
     const failed = new Map<string, FailedRepo>()
-    for (const [key, paths] of members) {
+    const scanned = await mapLimit([...members], SCAN_CONCURRENCY, async ([key, paths]) => {
       const cwd = paths[0]
-      if (cwd === undefined) continue
+      if (cwd === undefined) return undefined
       try {
         const entries = await listWorktrees(cwd)
-        const worktrees: ScannedWorktree[] = []
-        for (const [index, entry] of entries.entries()) {
+        const worktrees = await mapLimit(entries, SCAN_CONCURRENCY, async (entry, index) => {
           const path = await canonical(entry.path)
-          worktrees.push({ ...entry, path, exists: await isDirectory(path), main: index === 0 })
-        }
+          const scannedWorktree: ScannedWorktree = { ...entry, path, exists: await isDirectory(path), main: index === 0 }
+          return scannedWorktree
+        })
         const mainPath = worktrees.find(worktree => worktree.main)?.path ?? cwd
-        repos.push({ key, mainPath, worktrees })
+        return { key, repo: { key, mainPath, worktrees } satisfies ScannedRepo }
       } catch (error) {
-        failed.set(key, { mainPath: cwd, error: String(error) })
         this.ctx.logger.warn(`left-panel: git worktree list failed in ${cwd}: ${String(error)}`)
+        return { key, failed: { mainPath: cwd, error: String(error) } }
       }
+    })
+    for (const result of scanned) {
+      if (result === undefined) continue
+      if (result.repo !== undefined) repos.push(result.repo)
+      else if (result.failed !== undefined) failed.set(result.key, result.failed)
     }
     this.registry = registry
     this.repos = repos
@@ -423,10 +456,12 @@ export class WorktreeSyncService {
   private async sessionsByDirectory(): Promise<Map<string, SessionId[]>> {
     const byPath = new Map<string, SessionId[]>()
     try {
-      for (const snapshot of await this.ctx.sessionPersistence.list()) {
-        const cwd = snapshot.header.cwd
-        if (typeof cwd !== 'string' || cwd === '') continue
-        const path = await canonical(cwd)
+      const snapshots = (await this.ctx.sessionPersistence.list())
+        .filter(snapshot => typeof snapshot.header.cwd === 'string' && snapshot.header.cwd !== '')
+      // One realpath per stored session — bounded fan-out like scan().
+      const paths = await mapLimit(snapshots, SCAN_CONCURRENCY, snapshot => canonical(snapshot.header.cwd as string))
+      for (const [index, snapshot] of snapshots.entries()) {
+        const path = paths[index] as string
         const ids = byPath.get(path)
         if (ids === undefined) byPath.set(path, [snapshot.header.id])
         else ids.push(snapshot.header.id)
