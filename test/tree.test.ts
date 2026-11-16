@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, planWorkspaceMove,
+  arrangeSections, deriveActive, deriveFlat, deriveGroups, deriveSearchResults, planWorkspaceMove,
   repoGroupKey, workspaceDropAllowed, type GroupNode,
 } from '../src/client/tree.ts'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -245,6 +245,25 @@ test('a renamed blank Session stays visible with its title after selection moves
     list, workspaces, 'unnamed', [], new Map(), new Set(), { items: [], hasMore: false }, 10,
   )
   assert.deepEqual(unnamedHits.items, [])
+})
+
+test('deriveActive pins running, pending, and unread sessions newest-first regardless of expansion', () => {
+  const running = session('running', { running: true, updatedAt: 1 })
+  const idle = session('idle', { updatedAt: 4 })
+  const unread = session('unread', { updatedAt: 3 })
+  const pending = session('pending', { updatedAt: 2 })
+  const archived = session('archived', { running: true, updatedAt: 5 })
+  const list = sessionState([archived, idle, unread, pending, running])
+  const statuses = new Map<string, { completionUnread?: boolean; pendingInteraction?: { kind: string } }>([
+    ['unread', { completionUnread: true }],
+    ['pending', { pendingInteraction: { kind: 'approval' } }],
+  ])
+
+  // No group expansion is consulted: active rows come straight from the list.
+  assert.deepEqual(
+    deriveActive(list, ['archived' as SessionId], statuses as never, new Set()).map(row => row.id),
+    ['unread', 'pending', 'running'],
+  )
 })
 
 test('the selected unnamed blank Session keeps its localized placeholder title', () => {

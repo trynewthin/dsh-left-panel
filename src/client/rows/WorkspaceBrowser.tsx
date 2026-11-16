@@ -28,7 +28,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SessionNode, SessionOrderBy, TreeSection } from '../tree.ts'
 import {
-  activeScheduleSessionIds, arrangeSections, deriveFlat, deriveGroups, deriveSearchResults, mainSessionId,
+  activeScheduleSessionIds, arrangeSections, deriveActive, deriveFlat, deriveGroups, deriveSearchResults, mainSessionId,
   owningGroupKey, planWorkspaceMove, repoGroupKey, UNGROUPED_KEY, workspaceDropAllowed,
 } from '../tree.ts'
 import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
@@ -185,11 +185,13 @@ function nextSessionOrderAccount({
 }
 
 /** Grouping and ordering menu; own open state so it resets with the wide chrome. */
-function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
+function ViewOptionsMenu({ groupBy, orderBy, showActive, onGroupPick, onOrderPick, onActiveToggle, t }: {
   groupBy: 'workspace' | 'flat'
   orderBy: SessionOrderBy
+  showActive: boolean
   onGroupPick: (mode: 'workspace' | 'flat') => void
   onOrderPick: (mode: SessionOrderBy) => void
+  onActiveToggle: () => void
   t: WorkspaceBrowserProps['t']
 }) {
   const [open, setOpen] = useState(false)
@@ -205,11 +207,14 @@ function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
         { type: 'label' as const, id: 'order-by', text: t('orderBy.label') },
         { id: 'manual', label: t('orderBy.manual') },
         { id: 'updated', label: t('orderBy.updated') },
+        { type: 'separator' as const, id: 'active-separator' },
+        { id: 'active-sessions', label: t('viewOptions.activeSessions') },
       ]}
-      selectedIds={[groupBy, orderBy]}
+      selectedIds={[groupBy, orderBy, ...(showActive ? ['active-sessions'] : [])]}
       onSelect={(id) => {
         if (id === 'workspace' || id === 'flat') onGroupPick(id)
         else if (id === 'manual' || id === 'updated') onOrderPick(id)
+        else if (id === 'active-sessions') onActiveToggle()
         setOpen(false)
       }}
       align="end"
@@ -321,6 +326,8 @@ type SessionTreeProps = Pick<
   activeSchedules: ReadonlySet<SessionId>
   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
   orderBy: SessionOrderBy
+  /** Pin the derived running/pending/unread sessions above the section tree. */
+  showActiveSessions: boolean
   /** One Session chosen from search that must be exposed and scrolled into view. */
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
@@ -333,7 +340,7 @@ function SessionTree({
   workspaceReady, usePanelInfo,
   onRenameRequest, onBranchRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
   onRepoCreateWorktree,
-  insertWorkspaceBefore, insertSessionBefore, orderBy, activeSchedules,
+  insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, snapshot, worktrees,
@@ -423,6 +430,12 @@ function SessionTree({
   const sections = useMemo(
     () => arrangeSections(groups, snapshot, groupExpansion),
     [groups, snapshot, groupExpansion],
+  )
+  // The pinned jump list derives from the raw list, not the group projection,
+  // so folded Workspaces still contribute their active sessions.
+  const activeSessions = useMemo(
+    () => showActiveSessions ? deriveActive(list, archivedSessionIds, statuses, activeSchedules) : [],
+    [showActiveSessions, list, archivedSessionIds, statuses, activeSchedules],
   )
   // "Last updated" bubbles a group's most recent session update up through
   // every level: branches inside a project and projects inside an area both
@@ -900,6 +913,24 @@ function SessionTree({
         role="tree"
         aria-label={t('section.sessions')}
       >
+        {activeSessions.length > 0 && (
+          <div className={css.groupSection} role="group" aria-label={t('activeSessions.label')}>
+            <div className={css.activeHeader}>{t('activeSessions.label')}</div>
+            {activeSessions.map(node => (
+              <SessionNodeItem
+                key={node.id}
+                node={node}
+                currentId={current}
+                now={now}
+                onOpen={open}
+                onRename={onSessionRename}
+                onFork={forkSession}
+                onArchive={onSessionArchive}
+                t={t}
+              />
+            ))}
+          </div>
+        )}
         {groups.length === 0 && (
           <div className={css.empty}>{t('empty.none')}</div>
         )}
@@ -1190,6 +1221,8 @@ export function WorkspaceBrowser({
   const activeSchedules = useMemo(() => activeScheduleSessionIds(scheduleCatalog), [scheduleCatalog])
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
+  // Old persisted v1 documents lack the toggle; absent reads as off.
+  const showActiveSessions = useStore(s => s.showActiveSessions === true)
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
@@ -1712,8 +1745,10 @@ export function WorkspaceBrowser({
             <ViewOptionsMenu
               groupBy={groupBy}
               orderBy={orderBy}
+              showActive={showActiveSessions}
               onGroupPick={(mode) => { actions.setGroupBy(mode) }}
               onOrderPick={(mode) => { actions.setOrderBy(mode) }}
+              onActiveToggle={() => { actions.setShowActiveSessions(!showActiveSessions) }}
               t={t}
             />
           )}
@@ -1815,6 +1850,7 @@ export function WorkspaceBrowser({
                 insertWorkspaceBefore={insertWorkspaceBefore}
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
+                showActiveSessions={showActiveSessions}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
                 home={home}

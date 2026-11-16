@@ -35,6 +35,8 @@ type WorkspaceViewState = {
   sessionUpdatedAtByAccount: Record<string, Record<string, number>>
   /** Optional visual grouping layered above repository nodes. */
   projectAreas: ProjectArea[]
+  /** Pin a "活跃会话" section of running/pending/unread sessions at the top of the tree. */
+  showActiveSessions: boolean
 }
 
 /**
@@ -44,6 +46,7 @@ type WorkspaceViewState = {
 type WorkspaceViewActions = {
   setGroupBy: (draft: WorkspaceViewState, mode: SessionGroupBy) => void
   setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy) => void
+  setShowActiveSessions: (draft: WorkspaceViewState, show: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
   syncSessionOrderAccount: (
@@ -73,11 +76,13 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       sessionOrderByAccount: {},
       sessionUpdatedAtByAccount: {},
       projectAreas: [],
+      showActiveSessions: false,
     }),
     persist: 'dsh-left-panel.workspace.view.v1',
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
       setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },
+      setShowActiveSessions: (d, show: boolean) => { d.showActiveSessions = show },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys)

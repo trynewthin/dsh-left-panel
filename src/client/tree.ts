@@ -417,6 +417,43 @@ export function deriveFlat(
 }
 
 /**
+ * Derive the pinned "active sessions" list: every visible Session that is
+ * running itself or through a descendant subagent, awaits user interaction,
+ * or finished while unopened. Newest-first, independent of group expansion,
+ * so a session stays locatable even inside a folded Workspace. Opening an
+ * entry clears its unread-completion flag and drops it from the list when it
+ * has no other signal; running entries stay until activity ends.
+ * @param list - sessions list snapshot.
+ * @param archivedSessionIds - registry-global archive set.
+ * @param statuses - unified UI status by Session.
+ * @param activeSchedules - Sessions whose Host reminder catalog entry is active.
+ * @returns active rows in render order.
+ */
+export function deriveActive(
+  list: SessionListState,
+  archivedSessionIds: readonly SessionId[],
+  statuses: SessionStatuses,
+  activeSchedules: ReadonlySet<SessionId>,
+): SessionNode[] {
+  const archived = new Set(archivedSessionIds)
+  const current = mainSessionId(list)
+  const descendants = indexSubagentDescendants(list.byId)
+  const rows: SessionSummary[] = []
+  for (const id of list.ids) {
+    const s = list.byId[id]
+    if (s === undefined || !sessionVisible(s, current, archived)) continue
+    rows.push(s)
+  }
+  rows.sort(byRecency)
+  return rows
+    .map(session => sessionNode(session, descendants, statuses, activeSchedules))
+    .filter(node => node.pendingInteraction !== undefined
+      || node.running
+      || node.runningSubagentCount > 0
+      || node.completed)
+}
+
+/**
  * Merge immediate title/Workspace substring matches with ranked Host content
  * matches. Local rows lead newest-first, content-only rows retain backend
  * order, and duplicate sessions receive the backend snippet in place.
