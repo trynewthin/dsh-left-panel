@@ -421,6 +421,24 @@
   padding-left: 14px;
 }
 
+/* Optional tree guides (view option): in the 14px indent gutter each worktree
+   section gets an elbow into its branch row; all but the last sibling keep a
+   vertical run continuing past the row's midpoint — a plain ├/└ texture, no
+   arrows. Painted as backgrounds so row drop-marker pseudo-elements keep
+   working. */
+.treeGuides .nestedSection {
+  background-image:
+    linear-gradient(var(--dsw-alias-border-l4) 0 0),
+    linear-gradient(var(--dsw-alias-border-l4) 0 0);
+  background-repeat: no-repeat;
+  background-position: 5px 0, 5px 15px;
+  background-size: 1px 15px, 9px 1px;
+}
+
+.treeGuides .nestedSection:not(:last-child) {
+  background-size: 1px 100%, 9px 1px;
+}
+
 .nestedSection + .nestedSection {
   margin-top: 2px;
 }

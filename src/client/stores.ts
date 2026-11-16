@@ -39,6 +39,8 @@ type WorkspaceViewState = {
   showActiveSessions: boolean
   /** Fold the pinned active-sessions section down to its heading row. */
   activeSessionsCollapsed: boolean
+  /** Draw tree-guide lines in the indent gutter under each project row. */
+  treeGuides: boolean
 }
 
 /**
@@ -50,6 +52,7 @@ type WorkspaceViewActions = {
   setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy) => void
   setShowActiveSessions: (draft: WorkspaceViewState, show: boolean) => void
   setActiveSessionsCollapsed: (draft: WorkspaceViewState, collapsed: boolean) => void
+  setTreeGuides: (draft: WorkspaceViewState, show: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
   syncSessionOrderAccount: (
@@ -79,15 +82,19 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       sessionOrderByAccount: {},
       sessionUpdatedAtByAccount: {},
       projectAreas: [],
-      showActiveSessions: false,
+      showActiveSessions: true,
       activeSessionsCollapsed: false,
+      treeGuides: false,
     }),
-    persist: 'dsh-left-panel.workspace.view.v1',
+    // v2: showActiveSessions defaults on and treeGuides is new; the key bump
+    // gives existing installs the new default instead of a stale persisted off.
+    persist: 'dsh-left-panel.workspace.view.v2',
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
       setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },
       setShowActiveSessions: (d, show: boolean) => { d.showActiveSessions = show },
       setActiveSessionsCollapsed: (d, collapsed: boolean) => { d.activeSessionsCollapsed = collapsed },
+      setTreeGuides: (d, show: boolean) => { d.treeGuides = show },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys)

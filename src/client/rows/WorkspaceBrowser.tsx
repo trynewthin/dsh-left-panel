@@ -185,13 +185,15 @@ function nextSessionOrderAccount({
 }
 
 /** Grouping and ordering menu; own open state so it resets with the wide chrome. */
-function ViewOptionsMenu({ groupBy, orderBy, showActive, onGroupPick, onOrderPick, onActiveToggle, t }: {
+function ViewOptionsMenu({ groupBy, orderBy, showActive, showTreeGuides, onGroupPick, onOrderPick, onActiveToggle, onTreeGuidesToggle, t }: {
   groupBy: 'workspace' | 'flat'
   orderBy: SessionOrderBy
   showActive: boolean
+  showTreeGuides: boolean
   onGroupPick: (mode: 'workspace' | 'flat') => void
   onOrderPick: (mode: SessionOrderBy) => void
   onActiveToggle: () => void
+  onTreeGuidesToggle: () => void
   t: WorkspaceBrowserProps['t']
 }) {
   const [open, setOpen] = useState(false)
@@ -209,12 +211,17 @@ function ViewOptionsMenu({ groupBy, orderBy, showActive, onGroupPick, onOrderPic
         { id: 'updated', label: t('orderBy.updated') },
         { type: 'separator' as const, id: 'active-separator' },
         { id: 'active-sessions', label: t('viewOptions.activeSessions') },
+        { id: 'tree-guides', label: t('viewOptions.treeGuides') },
       ]}
-      selectedIds={[groupBy, orderBy, ...(showActive ? ['active-sessions'] : [])]}
+      selectedIds={[groupBy, orderBy,
+        ...(showActive ? ['active-sessions'] : []),
+        ...(showTreeGuides ? ['tree-guides'] : []),
+      ]}
       onSelect={(id) => {
         if (id === 'workspace' || id === 'flat') onGroupPick(id)
         else if (id === 'manual' || id === 'updated') onOrderPick(id)
         else if (id === 'active-sessions') onActiveToggle()
+        else if (id === 'tree-guides') onTreeGuidesToggle()
         setOpen(false)
       }}
       align="end"
@@ -332,6 +339,8 @@ type SessionTreeProps = Pick<
   activeSessionsCollapsed: boolean
   /** Toggle the pinned section's folded state. */
   onActiveSessionsToggle: () => void
+  /** Draw tree-guide connectors in the worktree indent gutter. */
+  showTreeGuides: boolean
   /** One Session chosen from search that must be exposed and scrolled into view. */
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
@@ -348,7 +357,7 @@ function SessionTree({
   workspaceReady, usePanelInfo,
   onRenameRequest, onBranchRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
   onRepoCreateWorktree,
-  insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSessionsCollapsed, onActiveSessionsToggle, activeSchedules,
+  insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSessionsCollapsed, onActiveSessionsToggle, showTreeGuides, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, onSessionRevealRequest, flashSessionId, snapshot, worktrees,
@@ -927,7 +936,7 @@ function SessionTree({
     <div className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <div
-        className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
+        className={clsx(css.list, showTreeGuides && css.treeGuides, workspaceDropAtListStart && css.listTopDropActive)}
         role="tree"
         aria-label={t('section.sessions')}
       >
@@ -1262,6 +1271,7 @@ export function WorkspaceBrowser({
   const showActiveSessions = useStore(s => s.showActiveSessions === true)
   // Old persisted v1 documents lack the fold flag; absent reads as expanded.
   const activeSessionsCollapsed = useStore(s => s.activeSessionsCollapsed === true)
+  const treeGuides = useStore(s => s.treeGuides === true)
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
@@ -1795,9 +1805,11 @@ export function WorkspaceBrowser({
               groupBy={groupBy}
               orderBy={orderBy}
               showActive={showActiveSessions}
+              showTreeGuides={treeGuides}
               onGroupPick={(mode) => { actions.setGroupBy(mode) }}
               onOrderPick={(mode) => { actions.setOrderBy(mode) }}
               onActiveToggle={() => { actions.setShowActiveSessions(!showActiveSessions) }}
+              onTreeGuidesToggle={() => { actions.setTreeGuides(!treeGuides) }}
               t={t}
             />
           )}
@@ -1900,6 +1912,7 @@ export function WorkspaceBrowser({
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
                 showActiveSessions={showActiveSessions}
+                showTreeGuides={treeGuides}
                 activeSessionsCollapsed={activeSessionsCollapsed}
                 onActiveSessionsToggle={() => { actions.setActiveSessionsCollapsed(!activeSessionsCollapsed) }}
                 revealSessionId={revealSessionId}
