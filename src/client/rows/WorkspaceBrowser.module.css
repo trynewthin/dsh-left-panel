@@ -482,6 +482,71 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* New-worktree dialog: two labeled fields, each an input with an optional
+   combobox button (unchecked-out branches / sibling directories). */
+.fieldLabel {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The dialog body already opens 20px below the header; pull the first
+   label back so title-to-field spacing reads like the other dialogs. */
+.fieldLabel:first-child {
+  margin-top: -10px;
+}
+
+.fieldHint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.comboRow {
+  position: relative;
+  display: flex;
+}
+
+.comboRow .renameInput {
+  flex: 1;
+  min-width: 0;
+  padding-right: 40px;
+}
+
+/* The dropdown trigger sits inside the input's right edge. */
+.comboButton {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  corner-shape: round;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Left-aligned guidance in the dialog's action row. */
+.footerHint {
+  margin-right: auto;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.comboButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .deleteAction:not(:disabled) {
   color: var(--dsw-alias-state-error-primary);
 }
@@ -490,6 +555,14 @@
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
+}
+
+.deleteCheck {
+  display: flex;
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

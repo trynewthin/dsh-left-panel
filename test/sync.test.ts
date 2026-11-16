@@ -54,7 +54,7 @@ test('skips ignored, bare and missing worktrees', () => {
   assert.deepEqual(plan.actions, [])
 })
 
-test('retitles a worktree Workspace only while it still carries the plugin-assigned title', () => {
+test('never retitles a worktree Workspace after a branch rename', () => {
   const registry = [MAIN,
     { id: 'ws-a', path: '/wt/a', title: 'old-branch' },
     { id: 'ws-b', path: '/wt/b', title: 'My custom name' },
@@ -67,7 +67,7 @@ test('retitles a worktree Workspace only while it still carries the plugin-assig
   const plan = planSync(registry, [scanned], memory({
     autoTitles: new Map([['/wt/a', 'old-branch'], ['/wt/b', 'b']]),
   }), NOW)
-  assert.deepEqual(plan.actions, [{ type: 'retitle', path: '/wt/a', workspaceId: 'ws-a', title: 'new-branch' }])
+  assert.deepEqual(plan.actions, [])
   assert.equal(plan.knownWorktrees.get('/wt/a'), REPO)
 })
 

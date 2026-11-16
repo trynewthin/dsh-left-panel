@@ -17,8 +17,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCloseFillRegular, IconPersonalizationOutlineRegular,
-  IconPlusOutlineRegular, IconProjectAddOutlineRegular, IconSearchOutlineRegular, Menu, Modal, Tooltip,
+  Button, Checkbox, IconChevronsUpDownOutlineRegular, IconCloseFillRegular, IconPersonalizationOutlineRegular,
+  IconPlusOutlineRegular, IconProjectAddOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -34,7 +34,7 @@ import {
 import { ProjectAreaHeader, ProjectRowItem, RepoRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
 import { moveProjectAreaOrder, projectAreasOrEmpty, type ProjectArea } from '../project-areas.ts'
-import type { WorktreeSnapshot } from '../../protocol.ts'
+import type { BranchOptions, WorktreeInfo, WorktreeSnapshot } from '../../protocol.ts'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -52,6 +52,16 @@ const DEFAULT_PROJECT_AREA_KEY = 'project-area:default'
 
 function projectAreaExpansionKey(id: string): string {
   return `project-area:${id}`
+}
+
+/** The worktree a registered Workspace id maps to, if it is one. */
+function worktreeOfWorkspace(snapshot: WorktreeSnapshot, workspaceId: WorkspaceId | undefined): WorktreeInfo | undefined {
+  if (workspaceId === undefined) return undefined
+  for (const repo of snapshot.repos) {
+    const found = repo.worktrees.find(worktree => worktree.workspaceId === workspaceId)
+    if (found !== undefined) return found
+  }
+  return undefined
 }
 
 /** Fold one Workspace without charging its provisional New Session against the ordinary-row limit. */
@@ -287,6 +297,8 @@ type SessionTreeProps = Pick<
   archivedSessionIds: readonly SessionNode['id'][]
   /** Open the browser-owned rename dialog for a real Workspace group. */
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
+  /** Open the browser-owned branch-rename dialog for a worktree row. */
+  onBranchRenameRequest: (workspaceId: WorkspaceId, currentBranch: string) => void
   /** Open the browser-owned rename dialog for a repository node. */
   onRepoRenameRequest: (repoKey: string, currentName: string) => void
   /** Plugin-owned project sections and their mutations. */
@@ -299,6 +311,8 @@ type SessionTreeProps = Pick<
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Remove every Workspace registration under one repository after confirmation. */
   onRepoDeleteRequest: (repoKey: string, title: string, workspaceIds: readonly WorkspaceId[]) => void
+  /** Open the browser-owned new-worktree dialog for a repository node. */
+  onRepoCreateWorktree: (repoKey: string) => void
   /** Open the browser-owned session rename dialog. */
   onSessionRename: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Archive a session (row menu action; the row disappears on the state echo). */
@@ -317,7 +331,8 @@ type SessionTreeProps = Pick<
 function SessionTree({
   useSessions, useSessionStatus, startSession, open, forkSession, workspaces, archivedSessionIds,
   workspaceReady, usePanelInfo,
-  onRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
+  onRenameRequest, onBranchRenameRequest, onDeleteRequest, onRepoDeleteRequest, onSessionRename, onSessionArchive, onRepoRenameRequest,
+  onRepoCreateWorktree,
   insertWorkspaceBefore, insertSessionBefore, orderBy, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -408,6 +423,37 @@ function SessionTree({
   const sections = useMemo(
     () => arrangeSections(groups, snapshot, groupExpansion),
     [groups, snapshot, groupExpansion],
+  )
+  // "Last updated" bubbles a group's most recent session update up through
+  // every level: branches inside a project and projects inside an area both
+  // sort by it. Groups with no session activity sink below active ones, in
+  // their existing relative order (the sort is stable).
+  const recencyByGroup = useMemo(() => {
+    const map = new Map<string, number>()
+    const note = (key: string, sessionIds: readonly SessionId[]): void => {
+      let best = Number.NEGATIVE_INFINITY
+      for (const id of sessionIds) {
+        const updatedAt = list.byId[id]?.updatedAt
+        if (updatedAt !== undefined && updatedAt > best) best = updatedAt
+      }
+      map.set(key, best)
+    }
+    for (const workspace of workspaces) note(workspace.workspaceId as string, workspace.sessionIds)
+    note(UNGROUPED_KEY, ungroupedSessionIds)
+    return map
+  }, [list, workspaces, ungroupedSessionIds])
+  const groupRecency = (key: string): number => recencyByGroup.get(key) ?? Number.NEGATIVE_INFINITY
+  const sectionRecency = (section: TreeSection): number => section.kind === 'group'
+    ? groupRecency(section.group.key)
+    : section.groups.reduce((best, group) => Math.max(best, groupRecency(group.key)), Number.NEGATIVE_INFINITY)
+  const orderedSections = useMemo(
+    () => orderBy === 'updated'
+      ? sections.map(section => section.kind !== 'repo'
+        ? section
+        : { ...section, groups: [...section.groups].sort((a, b) => groupRecency(b.key) - groupRecency(a.key)) })
+      : sections,
+    // groupRecency derives from recencyByGroup
+    [sections, orderBy, recencyByGroup],
   )
   const warnRejected = (what: string) => (reason: unknown): void => { console.warn(`${what} rejected:`, reason) }
   useEffect(() => {
@@ -516,12 +562,16 @@ function SessionTree({
   /** One Workspace group: header row + expanded top-level session rows. */
   const renderGroup = (group: GroupNode, nested: boolean, repoKey?: string) => {
     const workspaceId = group.workspaceId
+    const groupWorktree = nested ? worktreeOfWorkspace(snapshot, workspaceId) : undefined
     const collapsed = collapsedSessionRows(group.sessions)
     const sessionsExpanded = expandedSessionGroups.includes(group.key)
     const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.ids.includes(workspaceId)
       ? workspaceDrag.over.half
       : null
-    const workspaceDragProps = workspaceId === undefined ? undefined : {
+    // In "Last updated" mode positions are derived, so a workspace's own
+    // ordering drag would fight the sort; project rows keep their drag only
+    // for moving between areas (handled on the repo node).
+    const workspaceDragProps = workspaceId === undefined || orderBy === 'updated' ? undefined : {
       start: () => {
         workspaceDropCommitted.current = false
         setWorkspaceDrag({
@@ -540,6 +590,7 @@ function SessionTree({
       },
     }
     const acceptsWorkspaceDrag = workspaceId !== undefined && workspaceDrag !== null
+      && orderBy !== 'updated'
       && workspaceDropAllowed(workspaceDrag.repoKey, nested ? repoKey : undefined)
     const hoverWorkspace = !acceptsWorkspaceDrag
       ? undefined
@@ -606,7 +657,15 @@ function SessionTree({
               rename: () => {
                 if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
               },
+              ...(nested && groupWorktree?.branch != null
+                ? {
+                  renameBranch: () => {
+                    onBranchRenameRequest(group.workspaceId as WorkspaceId, groupWorktree.branch as string)
+                  },
+                }
+                : {}),
               delete: () => { onDeleteRequest(group.workspaceId as WorkspaceId, group.label) },
+              deleteDisabled: nested && groupWorktree?.main === true,
             }}
         />
         {(sessionsExpanded
@@ -675,7 +734,7 @@ function SessionTree({
   }
   const sectionsByArea = new Map(projectAreas.map(area => [area.id, [] as TreeSection[]]))
   const defaultSections: TreeSection[] = []
-  for (const section of sections) {
+  for (const section of orderedSections) {
     if (section.kind !== 'repo') {
       defaultSections.push(section)
       continue
@@ -684,6 +743,12 @@ function SessionTree({
     const bucket = areaId === undefined ? undefined : sectionsByArea.get(areaId)
     if (bucket === undefined) defaultSections.push(section)
     else bucket.push(section)
+  }
+  if (orderBy === 'updated') {
+    defaultSections.sort((a, b) => sectionRecency(b) - sectionRecency(a))
+    for (const bucket of sectionsByArea.values()) {
+      bucket.sort((a, b) => sectionRecency(b) - sectionRecency(a))
+    }
   }
   const renderTopSection = (section: TreeSection, areaId: string | null) => {
     if (section.kind === 'group') return renderGroup(section.group, false)
@@ -716,7 +781,7 @@ function SessionTree({
         workspaceDropCommitted.current = false
       },
     }
-    const acceptsOrder = workspaceDrag !== null && workspaceDrag.repoKey === undefined
+    const acceptsOrder = orderBy !== 'updated' && workspaceDrag !== null && workspaceDrag.repoKey === undefined
       && workspaceDrag.sourceAreaId === areaId && anchorId !== undefined
     return (
       <div
@@ -757,6 +822,7 @@ function SessionTree({
           onRename={() => { onRepoRenameRequest(section.repo.key, section.repo.name) }}
           onDelete={() => { onRepoDeleteRequest(section.repo.key, section.repo.name, section.workspaceIds as readonly WorkspaceId[]) }}
           onRestore={(path) => { worktrees.restoreWorkspace(path).catch(warnRejected('workspace restore')) }}
+          onCreateWorktree={() => { onRepoCreateWorktree(section.repo.key) }}
         />
         {section.expanded && section.groups.map(group => renderGroup(group, true, section.repo.key))}
       </div>
@@ -817,11 +883,11 @@ function SessionTree({
     )
   }
   const firstRowId = (() => {
-    const first = sections[0]
+    const first = orderedSections[0]
     if (first === undefined) return undefined
     return first.kind === 'group' ? (first.group.workspaceId as string | undefined) : first.workspaceIds[0]
   })()
-  const workspaceDropAtListStart = firstRowId !== undefined
+  const workspaceDropAtListStart = orderBy !== 'updated' && firstRowId !== undefined
     && workspaceDrag?.repoKey === undefined
     && workspaceDrag?.over?.ids[0] === firstRowId
     && workspaceDrag.over.half === 'before'
@@ -1315,7 +1381,7 @@ export function WorkspaceBrowser({
   }, [normalizedQuery, searchSessions])
 
   // Rename dialog (browser-owned so it outlives row unmounts during collapse).
-  const [renameTarget, setRenameTarget] = useState<{ workspaceId: WorkspaceId; currentTitle: string } | null>(null)
+  const [renameTarget, setRenameTarget] = useState<{ workspaceId: WorkspaceId; currentTitle: string; branch?: string | undefined } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -1346,6 +1412,33 @@ export function WorkspaceBrowser({
     }).catch((reason: unknown) => {
       setRenaming(false)
       setRenameError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+
+  // Branch rename dialog: renames the git branch itself (`git branch -m`),
+  // so all validation lives host-side and the field is a plain input.
+  const [branchRenameTarget, setBranchRenameTarget] = useState<{ workspaceId: WorkspaceId; currentBranch: string } | null>(null)
+  const [branchRenameDraft, setBranchRenameDraft] = useState('')
+  const [branchRenaming, setBranchRenaming] = useState(false)
+  const [branchRenameError, setBranchRenameError] = useState<string | null>(null)
+  const branchRenameTrimmed = branchRenameDraft.trim()
+  const branchRenameBlocked = branchRenaming || branchRenameTrimmed === ''
+    || branchRenameTarget === null || branchRenameTrimmed === branchRenameTarget.currentBranch
+  const closeBranchRename = () => {
+    if (branchRenaming) return
+    setBranchRenameTarget(null)
+    setBranchRenameError(null)
+  }
+  const confirmBranchRename = () => {
+    if (branchRenameBlocked || branchRenameTarget === null) return
+    setBranchRenaming(true)
+    setBranchRenameError(null)
+    worktrees.renameBranch(branchRenameTarget.workspaceId as string, branchRenameTrimmed).then(() => {
+      setBranchRenaming(false)
+      setBranchRenameTarget(null)
+    }).catch((reason: unknown) => {
+      setBranchRenaming(false)
+      setBranchRenameError(reason instanceof Error ? reason.message : String(reason))
     })
   }
 
@@ -1419,6 +1512,65 @@ export function WorkspaceBrowser({
     })
   }
 
+  // New-worktree dialog: branch (typed, or picked from the unchecked-out
+  // locals) plus a location input prefilled with the sibling-directory
+  // convention. Options come from the host because only it can ask git; the
+  // typed branch decides whether `git worktree add` checks out or grows one.
+  const [worktreeDialog, setWorktreeDialog] = useState<{ repoKey: string; repoName: string } | null>(null)
+  const [worktreeOptions, setWorktreeOptions] = useState<
+    | { readonly status: 'loading' }
+    | { readonly status: 'error'; readonly message: string }
+    | { readonly status: 'ready'; readonly options: BranchOptions }
+    | null
+  >(null)
+  const [branchDraft, setBranchDraft] = useState('')
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false)
+  const [parentMenuOpen, setParentMenuOpen] = useState(false)
+  const [pathParent, setPathParent] = useState<string | null>(null)
+  const [pathDraft, setPathDraft] = useState('')
+  const [pathEdited, setPathEdited] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  useEffect(() => {
+    if (worktreeDialog === null) return
+    const repoKey = worktreeDialog.repoKey
+    setWorktreeOptions({ status: 'loading' })
+    worktrees.branchOptions(repoKey).then((options) => {
+      setWorktreeOptions({ status: 'ready', options })
+    }).catch((reason: unknown) => {
+      setWorktreeOptions({ status: 'error', message: reason instanceof Error ? reason.message : String(reason) })
+    })
+  }, [worktreeDialog, worktrees])
+  const options = worktreeOptions?.status === 'ready' ? worktreeOptions.options : null
+  const branchTrimmed = branchDraft.trim()
+  const worktreeParent = pathParent ?? options?.parents[0] ?? ''
+  // Same convention the demo and `git worktree` users reach for: the main
+  // worktree's sibling named after the repository and the branch.
+  const suggestedPath = worktreeParent === '' || options === null || branchTrimmed === ''
+    ? ''
+    : `${worktreeParent === '/' ? '' : worktreeParent}/${options.dirName}-${branchTrimmed.replaceAll('/', '-')}`
+  const pathValue = pathEdited ? pathDraft : suggestedPath
+  const branchIsNew = options !== null && branchTrimmed !== '' && !options.availableBranches.includes(branchTrimmed)
+  const branchChoices = options === null ? [] : options.availableBranches
+    .filter(branch => branch.toLowerCase().includes(branchTrimmed.toLowerCase()))
+  const closeWorktreeDialog = () => {
+    if (creating) return
+    setWorktreeDialog(null)
+    setCreateError(null)
+  }
+  const confirmWorktreeCreate = () => {
+    if (worktreeDialog === null || creating || branchTrimmed === '' || pathValue.trim() === '') return
+    setCreating(true)
+    setCreateError(null)
+    worktrees.createWorktree({ repoKey: worktreeDialog.repoKey, branch: branchTrimmed, path: pathValue.trim() }).then(() => {
+      setCreating(false)
+      setWorktreeDialog(null)
+    }).catch((reason: unknown) => {
+      setCreating(false)
+      setCreateError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
   const [deleteTarget, setDeleteTarget] = useState<
@@ -1429,17 +1581,28 @@ export function WorkspaceBrowser({
   const [deleting, setDeleting] = useState(false)
   const [deleteCommittedIds, setDeleteCommittedIds] = useState<readonly WorkspaceId[] | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteAlsoBranch, setDeleteAlsoBranch] = useState(false)
+  const [deleteForce, setDeleteForce] = useState(false)
   useEffect(() => {
     if (deleteCommittedIds === null
       || workspaces.some(workspace => deleteCommittedIds.includes(workspace.workspaceId))) return
     setDeleting(false)
     setDeleteCommittedIds(null)
     setDeleteTarget(null)
+    setDeleteAlsoBranch(false)
+    setDeleteForce(false)
   }, [deleteCommittedIds, workspaces])
+  // "Also delete the branch" is offered on a non-main worktree sitting on a branch.
+  const deleteWorktree = deleteTarget?.kind === 'workspace'
+    ? worktreeOfWorkspace(snapshot, deleteTarget.workspaceId)
+    : undefined
+  const deleteBranchOffered = deleteWorktree !== undefined && !deleteWorktree.main && deleteWorktree.branch !== null
   const closeDelete = () => {
     if (deleting) return
     setDeleteTarget(null)
     setDeleteError(null)
+    setDeleteAlsoBranch(false)
+    setDeleteForce(false)
   }
   const confirmDelete = () => {
     /* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
@@ -1450,13 +1613,22 @@ export function WorkspaceBrowser({
     const target = deleteTarget
     const removal = target.kind === 'repository'
       ? worktrees.deleteRepository(target.repoKey)
-      : worktrees.deleteWorkspace(target.workspaceId)
+      : worktrees.deleteWorkspace(target.workspaceId, deleteBranchOffered && deleteAlsoBranch
+        ? { deleteBranch: true, force: deleteForce }
+        : undefined)
     removal.then(() => {
       // Wait until the official Workspace stream acknowledges every removal.
       setDeleteCommittedIds(target.kind === 'repository' ? target.workspaceIds : [target.workspaceId])
     }).catch((reason: unknown) => {
       setDeleting(false)
-      setDeleteError(reason instanceof Error ? reason.message : String(reason))
+      const message = reason instanceof Error ? reason.message : String(reason)
+      // A dirty worktree or unmerged branch bounces once into the dialog's
+      // second confirmation; the same button then repeats with force.
+      if (message.startsWith('left-panel/unsafe-delete')) {
+        setDeleteForce(true)
+        return
+      }
+      setDeleteError(message)
     })
   }
 
@@ -1658,22 +1830,46 @@ export function WorkspaceBrowser({
                 onRepoProjectAreaChange={(repoKey, areaId) => { actions.setRepoProjectArea(repoKey, areaId) }}
                 onProjectAreaOrderChange={(areaIds) => { actions.setProjectAreaOrder(areaIds) }}
                 onRenameRequest={(workspaceId, currentTitle) => {
-                  setRenameTarget({ workspaceId, currentTitle })
+                  setRenameTarget({
+                    workspaceId,
+                    currentTitle,
+                    branch: worktreeOfWorkspace(snapshot, workspaceId)?.branch ?? undefined,
+                  })
                   setRenameDraft(currentTitle)
                   setRenameError(null)
+                }}
+                onBranchRenameRequest={(workspaceId, currentBranch) => {
+                  setBranchRenameTarget({ workspaceId, currentBranch })
+                  setBranchRenameDraft(currentBranch)
+                  setBranchRenameError(null)
                 }}
                 onDeleteRequest={(workspaceId, title) => {
                   setDeleteTarget({ kind: 'workspace', workspaceId, title })
                   setDeleteError(null)
+                  setDeleteAlsoBranch(false)
+                  setDeleteForce(false)
                 }}
                 onRepoDeleteRequest={(repoKey, title, workspaceIds) => {
                   setDeleteTarget({ kind: 'repository', repoKey, title, workspaceIds })
                   setDeleteError(null)
+                  setDeleteAlsoBranch(false)
+                  setDeleteForce(false)
                 }}
                 onRepoRenameRequest={(repoKey, currentName) => {
                   setRepoRenameTarget({ repoKey, currentName })
                   setRepoRenameDraft(currentName)
                   setRepoRenameError(null)
+                }}
+                onRepoCreateWorktree={(repoKey) => {
+                  const repo = snapshot.repos.find(candidate => candidate.key === repoKey)
+                  setWorktreeDialog({ repoKey, repoName: repo?.name ?? repoKey })
+                  setBranchDraft('')
+                  setBranchMenuOpen(false)
+                  setParentMenuOpen(false)
+                  setPathParent(null)
+                  setPathDraft('')
+                  setPathEdited(false)
+                  setCreateError(null)
                 }}
               />
             ))}
@@ -1723,27 +1919,73 @@ export function WorkspaceBrowser({
           </>
         )}
       >
+        <div className={css.comboRow}>
+          <input
+            className={css.renameInput}
+            value={renameDraft}
+            aria-label={t('field.workspaceName')}
+            autoFocus
+            disabled={renaming}
+            onFocus={(e) => { e.target.select() }}
+            onChange={(e) => { setRenameDraft(e.target.value); setRenameError(null) }}
+            onCompositionStart={() => { composingRef.current = true }}
+            onCompositionEnd={() => { composingRef.current = false }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !composingRef.current) {
+                e.preventDefault()
+                confirmRename()
+              }
+            }}
+          />
+          {renameTarget?.branch != null && (
+            <button
+              type="button"
+              className={css.comboButton}
+              aria-label={t('worktree.rename.reset')}
+              title={t('worktree.rename.reset')}
+              disabled={renaming || renameDraft === renameTarget.branch}
+              onClick={() => { setRenameDraft(renameTarget.branch as string); setRenameError(null) }}
+            >
+              <IconRefreshOutlineRegular />
+            </button>
+          )}
+        </div>
+        {renameDuplicate && (
+          <div className={css.renameError} role="alert">{t('conflict.named', { name: renameTrimmed })}</div>
+        )}
+        {renameError !== null && <div className={css.renameError} role="alert">{renameError}</div>}
+      </Modal>
+
+      <Modal
+        open={branchRenameTarget !== null}
+        onClose={closeBranchRename}
+        closeLabel={t('close')}
+        title={t('worktree.rename.branch')}
+        footer={(
+          <>
+            <Button variant="outline" disabled={branchRenaming} onClick={closeBranchRename}>{t('cancel')}</Button>
+            <Button variant="primary" disabled={branchRenameBlocked} onClick={confirmBranchRename}>{t('rename')}</Button>
+          </>
+        )}
+      >
         <input
           className={css.renameInput}
-          value={renameDraft}
-          aria-label={t('field.workspaceName')}
+          value={branchRenameDraft}
+          aria-label={t('worktree.rename.branch.aria')}
           autoFocus
-          disabled={renaming}
+          disabled={branchRenaming}
           onFocus={(e) => { e.target.select() }}
-          onChange={(e) => { setRenameDraft(e.target.value); setRenameError(null) }}
+          onChange={(e) => { setBranchRenameDraft(e.target.value); setBranchRenameError(null) }}
           onCompositionStart={() => { composingRef.current = true }}
           onCompositionEnd={() => { composingRef.current = false }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !composingRef.current) {
               e.preventDefault()
-              confirmRename()
+              confirmBranchRename()
             }
           }}
         />
-        {renameDuplicate && (
-          <div className={css.renameError} role="alert">{t('conflict.named', { name: renameTrimmed })}</div>
-        )}
-        {renameError !== null && <div className={css.renameError} role="alert">{renameError}</div>}
+        {branchRenameError !== null && <div className={css.renameError} role="alert">{branchRenameError}</div>}
       </Modal>
 
       <Modal
@@ -1778,6 +2020,120 @@ export function WorkspaceBrowser({
           }}
         />
         {repoRenameError !== null && <div className={css.renameError} role="alert">{repoRenameError}</div>}
+      </Modal>
+
+      <Modal
+        open={worktreeDialog !== null}
+        onClose={closeWorktreeDialog}
+        closeLabel={t('close')}
+        title={t('worktree.create.title')}
+        footer={(
+          <>
+            <span className={css.footerHint}>{t('worktree.create.footer.hint')}</span>
+            <Button variant="outline" disabled={creating} onClick={closeWorktreeDialog}>{t('cancel')}</Button>
+            <Button
+              variant="primary"
+              disabled={creating || options === null || branchTrimmed === '' || pathValue.trim() === ''}
+              onClick={confirmWorktreeCreate}
+            >
+              {t('worktree.create.confirm')}
+            </Button>
+          </>
+        )}
+      >
+        {worktreeOptions?.status === 'error' && (
+          <div className={css.renameError} role="alert">{worktreeOptions.message}</div>
+        )}
+        <>
+            <div className={css.fieldLabel}>{t('worktree.create.branch')}</div>
+            <div className={css.comboRow}>
+              <input
+                className={css.renameInput}
+                value={branchDraft}
+                aria-label={t('worktree.create.branch')}
+                autoFocus
+                disabled={creating || options === null}
+                onChange={(e) => { setBranchDraft(e.target.value); setCreateError(null) }}
+                onCompositionStart={() => { composingRef.current = true }}
+                onCompositionEnd={() => { composingRef.current = false }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !composingRef.current) {
+                    e.preventDefault()
+                    confirmWorktreeCreate()
+                  }
+                }}
+              />
+              <Menu
+                open={branchMenuOpen}
+                onClose={() => { setBranchMenuOpen(false) }}
+                items={branchChoices.length > 0
+                  ? branchChoices.map(branch => ({ id: branch, label: branch }))
+                  : [{ type: 'label' as const, id: 'empty', text: t('worktree.create.branches.empty') }]}
+                onSelect={(id) => { setBranchMenuOpen(false); setBranchDraft(id) }}
+                portal
+                closeOnPointerLeave
+                anchor={(
+                  <button
+                    type="button"
+                    className={css.comboButton}
+                    aria-label={t('worktree.create.branches.aria')}
+                    disabled={creating || options === null}
+                    onClick={() => { setBranchMenuOpen(v => !v) }}
+                  >
+                    <IconChevronsUpDownOutlineRegular />
+                  </button>
+                )}
+              />
+            </div>
+            {options !== null && branchIsNew && (
+              <div className={css.fieldHint}>{t('worktree.create.base', { base: options.base })}</div>
+            )}
+            <div className={css.fieldLabel}>{t('worktree.create.path')}</div>
+            <div className={css.comboRow}>
+              <input
+                className={css.renameInput}
+                value={pathValue}
+                aria-label={t('worktree.create.path')}
+                disabled={creating || options === null}
+                onChange={(e) => { setPathDraft(e.target.value); setPathEdited(true); setCreateError(null) }}
+                onCompositionStart={() => { composingRef.current = true }}
+                onCompositionEnd={() => { composingRef.current = false }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !composingRef.current) {
+                    e.preventDefault()
+                    confirmWorktreeCreate()
+                  }
+                }}
+              />
+              <Menu
+                open={parentMenuOpen}
+                onClose={() => { setParentMenuOpen(false) }}
+                items={options !== null && options.parents.length > 0
+                  ? options.parents.map(parent => ({ id: parent, label: parent }))
+                  : [{ type: 'label' as const, id: 'empty', text: t('worktree.create.parents.empty') }]}
+                onSelect={(id) => {
+                  setParentMenuOpen(false)
+                  setPathParent(id)
+                  setPathEdited(false)
+                }}
+                portal
+                closeOnPointerLeave
+                anchor={(
+                  <button
+                    type="button"
+                    className={css.comboButton}
+                    aria-label={t('worktree.create.parents.aria')}
+                    disabled={creating || options === null}
+                    onClick={() => { setParentMenuOpen(v => !v) }}
+                  >
+                    <IconChevronsUpDownOutlineRegular />
+                  </button>
+                )}
+              />
+            </div>
+        </>
+        {creating && <div className={css.deleteStatus} role="status">{t('worktree.create.pending')}</div>}
+        {createError !== null && <div className={css.renameError} role="alert">{createError}</div>}
       </Modal>
 
       <Modal
@@ -1828,11 +2184,23 @@ export function WorkspaceBrowser({
               disabled={deleting}
               onClick={confirmDelete}
             >
-              {t(deleteTarget?.kind === 'repository' ? 'delete.repository' : 'delete.workspace')}
+              {t(deleteForce
+                ? 'delete.confirm.force'
+                : deleteTarget?.kind === 'repository' ? 'delete.repository' : 'delete.workspace')}
             </Button>
           </>
         )}
       >
+        {deleteBranchOffered && (
+          <Checkbox
+            className={css.deleteCheck}
+            checked={deleteAlsoBranch}
+            disabled={deleting}
+            onChange={setDeleteAlsoBranch}
+            label={t('delete.workspace.branch', { branch: deleteWorktree?.branch ?? '' })}
+          />
+        )}
+        {deleteForce && <div className={css.renameError} role="alert">{t('delete.unsafe')}</div>}
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
       </Modal>

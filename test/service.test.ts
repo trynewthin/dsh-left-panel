@@ -7,16 +7,16 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ConnectionFetchRoute, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 
-import { runGit } from '../src/git.ts'
+import { isDirectory, runGit } from '../src/git.ts'
 import { WorktreeSyncService } from '../src/service.ts'
 import { loadState } from '../src/state.ts'
-import type { WorktreeSnapshot } from '../src/protocol.ts'
+import type { BranchOptions, WorktreeSnapshot } from '../src/protocol.ts'
 
 const GIT_IDENTITY = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', '-c', 'commit.gpgsign=false']
 
@@ -257,10 +257,10 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.deepEqual(main.sessionIds, ['session-cwd-only'])
   })
 
-  await t.test('follows a branch switch while the plugin-assigned title is untouched', async () => {
+  await t.test('keeps the display name on a branch switch (names are decoupled)', async () => {
     await git(featPath, 'checkout', '-q', '-b', 'feat/y')
     await harness.service.syncNow()
-    assert.equal((await registry.resolveByPath(featPath))?.title, 'feat/y')
+    assert.equal((await registry.resolveByPath(featPath))?.title, 'feat/x')
   })
 
   await t.test('leaves a user-renamed worktree Workspace alone', async () => {
@@ -370,8 +370,9 @@ test('worktree sync end to end against a real repository', async (t) => {
     // The plugin has no per-repository switches and no manual registration:
     // reconciliation is continuous and the browser only reads or refreshes.
     assert.deepEqual(harness.routePaths().sort(), [
+      '/api/left-panel/branchOptions', '/api/left-panel/createWorktree',
       '/api/left-panel/deleteRepository', '/api/left-panel/deleteWorkspace', '/api/left-panel/list',
-      '/api/left-panel/restoreWorkspace', '/api/left-panel/setRepoName',
+      '/api/left-panel/renameBranch', '/api/left-panel/restoreWorkspace', '/api/left-panel/setRepoName',
       '/api/left-panel/setWorkspaceTitle', '/api/left-panel/sync',
     ])
     assert.equal(harness.service.snapshot().repos.length, 1)
@@ -417,24 +418,12 @@ test('worktree sync end to end against a real repository', async (t) => {
     assert.equal(registry.sessions.length, 2, 'session logs untouched')
   })
 
-  await t.test('removes the main worktree record without recreating it and keeps the linked one', async () => {
-    const removed = await harness.rpc('deleteWorkspace', { workspaceId: main.id })
-    assert.equal(registry.get(main.id), undefined, 'main registration removed')
+  await t.test('refuses to delete the main worktree record', async () => {
+    await assert.rejects(harness.rpc('deleteWorkspace', { workspaceId: main.id }), /main-worktree/)
+    assert.ok(registry.get(main.id), 'main registration kept')
     assert.equal(await realpath(repo), repo, 'main worktree directory retained')
-    const repoInfo = removed.repos[0]
-    assert.ok(repoInfo)
-    assert.equal(repoInfo.worktrees.find(worktree => worktree.main)?.workspaceId, null)
-    assert.deepEqual(repoInfo.deletedWorktrees?.map(entry => [entry.path, entry.branch, entry.title]), [
-      [repo, 'main', 'repo'],
-    ])
     const feat = await registry.resolveByPath(featPath)
     assert.ok(feat, 'linked worktree record untouched')
-    await harness.service.syncNow()
-    await harness.service.syncNow()
-    assert.equal(await registry.resolveByPath(repo), undefined, 'main worktree is not auto-registered again')
-    assert.equal(await realpath(repo), repo)
-    assert.ok(registry.get(feat.id), 'linked worktree still managed')
-    assert.equal((await loadState(join(root, 'state.json'))).state.ignored.includes(repo), true)
     assert.equal(registry.sessions.length, 2, 'session logs untouched')
   })
 
@@ -511,5 +500,205 @@ test('worktree sync end to end against a real repository', async (t) => {
       'the untouched worktree stays removed',
     )
     assert.equal(persisted.state.ignored.includes(threePath), true)
+  })
+})
+
+test('createWorktree runs git worktree add and reconciliation registers it', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'left-panel-create-')))
+  t.after(async () => { await rm(root, { recursive: true, force: true }) })
+  const repo = join(root, 'repo')
+  await git(root, 'init', '-q', '-b', 'main', repo)
+  await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init')
+  // A local branch no worktree holds: the dialog offers it for checkout.
+  await git(repo, 'branch', 'release/1.0')
+
+  const registry = new FakeRegistry([])
+  await registry.create(repo, 'repo')
+  const harness = createHarness(registry, join(root, 'state.json'))
+  t.after(() => { harness.dispose() })
+  await harness.service.start()
+  await harness.service.syncNow()
+  const repoKey = harness.service.snapshot().repos[0]?.key
+  assert.ok(repoKey)
+
+  await t.test('branchOptions lists unchecked-out branches, the base and the sibling directories', async () => {
+    const options = await harness.rpc('branchOptions', { repoKey }) as unknown as BranchOptions
+    assert.deepEqual(options.availableBranches, ['release/1.0'], 'the checked-out main is excluded')
+    assert.equal(options.base, 'main')
+    assert.deepEqual(options.parents, [root])
+    assert.equal(options.dirName, 'repo')
+    await assert.rejects(harness.rpc('branchOptions', { repoKey: '/nope/.git' }), /unknown-repository/)
+    await assert.rejects(harness.rpc('branchOptions', {}), /bad-request/)
+  })
+
+  const newPath = join(root, 'repo-feat-new')
+
+  await t.test('grows a new branch and the worktree registers under the project', async () => {
+    const snapshot = await harness.rpc('createWorktree', { repoKey, branch: 'feat/new', path: newPath })
+    const worktree = snapshot.repos[0]?.worktrees.find(entry => entry.path === newPath)
+    assert.ok(worktree)
+    assert.equal(worktree.branch, 'feat/new')
+    assert.notEqual(worktree.workspaceId, null, 'registered by the same reconcile a manual add triggers')
+    assert.equal((await registry.resolveByPath(newPath))?.title, 'feat/new')
+    assert.equal(await git(newPath, 'branch', '--show-current'), 'feat/new')
+  })
+
+  await t.test('checks out an existing unchecked-out branch', async () => {
+    const target = join(root, 'repo-release')
+    const snapshot = await harness.rpc('createWorktree', { repoKey, branch: 'release/1.0', path: target })
+    const worktree = snapshot.repos[0]?.worktrees.find(entry => entry.path === target)
+    assert.ok(worktree)
+    assert.equal(worktree.branch, 'release/1.0')
+    assert.notEqual(worktree.workspaceId, null)
+    assert.equal(await git(target, 'branch', '--show-current'), 'release/1.0')
+  })
+
+  await t.test('rejects bad input and git failures with structured errors', async () => {
+    await assert.rejects(harness.rpc('createWorktree', { repoKey }), /bad-request/)
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey: '/nope/.git', branch: 'x', path: join(root, 'a') }),
+      /unknown-repository/,
+    )
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey, branch: 'feat/relative', path: 'relative/dir' }),
+      /bad-request/,
+    )
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey, branch: 'feat/dup', path: repo }),
+      /path-conflict/,
+    )
+    const existing = join(root, 'exists')
+    await mkdir(existing)
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey, branch: 'feat/elsewhere', path: existing }),
+      /path-exists/,
+    )
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey, branch: 'bad..name', path: join(root, 'x1') }),
+      /invalid-branch/,
+    )
+    // 'main' is held by the main worktree: git refuses the checkout itself.
+    await assert.rejects(
+      harness.rpc('createWorktree', { repoKey, branch: 'main', path: join(root, 'x2') }),
+      /git-error/,
+    )
+  })
+
+  await t.test('creating at a tombstoned path lifts the removal memory', async () => {
+    const worktree = harness.service.snapshot().repos[0]?.worktrees.find(entry => entry.path === newPath)
+    const workspaceId = worktree?.workspaceId
+    assert.ok(workspaceId)
+    // Remove the registration (tombstone) and the worktree itself, then let the
+    // dialog recreate both: the plugin treats that as a native re-add.
+    await harness.rpc('deleteWorkspace', { workspaceId })
+    await git(repo, 'worktree', 'remove', '--force', newPath)
+    await harness.service.syncNow()
+    let persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(newPath), true)
+    assert.equal(persisted.state.deletedWorktrees.some(entry => entry.path === newPath), true)
+
+    const snapshot = await harness.rpc('createWorktree', { repoKey, branch: 'feat/new', path: newPath })
+    persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.ignored.includes(newPath), false, 'ignore lifted')
+    assert.equal(persisted.state.deletedWorktrees.some(entry => entry.path === newPath), false, 'tombstone lifted')
+    const recreated = snapshot.repos[0]?.worktrees.find(entry => entry.path === newPath)
+    assert.ok(recreated)
+    assert.notEqual(recreated.workspaceId, null, 'registered again')
+    assert.equal(snapshot.repos[0]?.deletedWorktrees?.length, 0)
+  })
+})
+
+test('renameBranch and deleteBranch drive git mutations through the dialog actions', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'left-panel-branch-')))
+  t.after(async () => { await rm(root, { recursive: true, force: true }) })
+  const repo = join(root, 'repo')
+  await git(root, 'init', '-q', '-b', 'main', repo)
+  await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init')
+  const featPath = join(root, 'repo-feat')
+  await git(repo, 'worktree', 'add', '-b', 'feat', featPath)
+
+  const registry = new FakeRegistry([])
+  await registry.create(repo, 'repo')
+  const harness = createHarness(registry, join(root, 'state.json'))
+  t.after(() => { harness.dispose() })
+  await harness.service.start()
+  await harness.service.syncNow()
+  const repoKey = harness.service.snapshot().repos[0]?.key
+  assert.ok(repoKey)
+  const featWorkspaceId = harness.service.snapshot().repos[0]?.worktrees
+    .find(worktree => worktree.path === featPath)?.workspaceId
+  assert.ok(featWorkspaceId)
+  const mainWorkspaceId = harness.service.snapshot().repos[0]?.worktrees
+    .find(worktree => worktree.main)?.workspaceId
+  assert.ok(mainWorkspaceId)
+
+  await t.test('renameBranch renames the checked-out branch without touching the display name', async () => {
+    const snapshot = await harness.rpc('renameBranch', { workspaceId: featWorkspaceId, branch: 'feat/renamed' })
+    const worktree = snapshot.repos[0]?.worktrees.find(entry => entry.path === featPath)
+    assert.equal(worktree?.branch, 'feat/renamed')
+    assert.equal(await git(featPath, 'branch', '--show-current'), 'feat/renamed')
+    assert.equal((await registry.resolveByPath(featPath))?.title, 'feat', 'display name stays decoupled from the branch')
+    await git(featPath, 'branch', '-m', 'feat')
+    await harness.service.syncNow()
+  })
+
+  await t.test('renameBranch rejects bad input and collisions', async () => {
+    await assert.rejects(harness.rpc('renameBranch', {}), /bad-request/)
+    await assert.rejects(harness.rpc('renameBranch', { workspaceId: 'ws-missing', branch: 'x' }), /unknown-workspace/)
+    await assert.rejects(harness.rpc('renameBranch', { workspaceId: featWorkspaceId, branch: 'bad..name' }), /invalid-branch/)
+    await assert.rejects(harness.rpc('renameBranch', { workspaceId: featWorkspaceId, branch: 'main' }), /branch-exists/)
+    // Renaming to the current name is a no-op, not an error.
+    await harness.rpc('renameBranch', { workspaceId: featWorkspaceId, branch: 'feat' })
+  })
+
+  await t.test('deleteBranch removes a clean merged worktree and its branch without a tombstone', async () => {
+    const mergedPath = join(root, 'repo-merged')
+    await git(repo, 'worktree', 'add', '-b', 'merged', mergedPath)
+    await harness.service.syncNow()
+    const workspaceId = harness.service.snapshot().repos[0]?.worktrees
+      .find(worktree => worktree.path === mergedPath)?.workspaceId
+    assert.ok(workspaceId)
+
+    const snapshot = await harness.rpc('deleteWorkspace', { workspaceId, deleteBranch: true })
+    assert.equal(snapshot.repos[0]?.worktrees.some(worktree => worktree.path === mergedPath), false)
+    assert.equal(await isDirectory(mergedPath), false, 'worktree directory removed')
+    assert.equal(await git(repo, 'branch', '--list', 'merged'), '', 'branch deleted')
+    const persisted = await loadState(join(root, 'state.json'))
+    assert.equal(persisted.state.deletedWorktrees.some(entry => entry.path === mergedPath), false, 'no tombstone for a gone directory')
+  })
+
+  await t.test('deleteBranch on a dirty or unmerged worktree needs the second confirmation', async () => {
+    // Uncommitted work is rejected until the dialog repeats with force.
+    await writeFile(join(featPath, 'dirty.txt'), 'wip')
+    await assert.rejects(
+      harness.rpc('deleteWorkspace', { workspaceId: featWorkspaceId, deleteBranch: true }),
+      /unsafe-delete/,
+    )
+    // A clean tree with unmerged commits trips the same gate.
+    await git(featPath, 'add', 'dirty.txt')
+    await git(featPath, 'commit', '-qm', 'wip')
+    await assert.rejects(
+      harness.rpc('deleteWorkspace', { workspaceId: featWorkspaceId, deleteBranch: true }),
+      /unsafe-delete/,
+    )
+    const snapshot = await harness.rpc('deleteWorkspace', { workspaceId: featWorkspaceId, deleteBranch: true, force: true })
+    assert.equal(snapshot.repos[0]?.worktrees.some(worktree => worktree.path === featPath), false)
+    assert.equal(await isDirectory(featPath), false, 'worktree directory removed')
+    assert.equal(await git(repo, 'branch', '--list', 'feat'), '', 'branch deleted')
+  })
+
+  await t.test('deleteBranch refuses the main worktree and non-branch workspaces', async () => {
+    await assert.rejects(
+      harness.rpc('deleteWorkspace', { workspaceId: mainWorkspaceId, deleteBranch: true }),
+      /main-worktree/,
+    )
+    const plain = join(root, 'plain')
+    await mkdir(plain)
+    const outside = await registry.create(plain, 'plain')
+    await assert.rejects(
+      harness.rpc('deleteWorkspace', { workspaceId: outside.id, deleteBranch: true }),
+      /bad-request/,
+    )
+    await registry.delete(outside.id)
   })
 })

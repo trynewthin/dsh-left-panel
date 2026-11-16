@@ -92,6 +92,12 @@ export interface GroupNode {
   expanded: boolean
   /** The group contains the selected session (active folder tint; supplied here so the renderer never scans). */
   containsCurrent: boolean
+  /** Any visible member (or a descendant subagent) is actively running — folded groups keep this so the header can still signal activity. */
+  running: boolean
+  /** Any visible member finished while unopened (the unread completion dot). */
+  completedUnread: boolean
+  /** Any visible member awaits user interaction (approval, plan review, question). */
+  pendingInteraction: boolean
   /** Visible session rows (empty while the group is folded). */
   sessions: readonly SessionNode[]
 }
@@ -351,6 +357,15 @@ export function deriveGroups(
   const groups: GroupNode[] = []
   for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
     const expanded = expandedGroups.has(g.key)
+    let running = false
+    let completedUnread = false
+    let pendingInteraction = false
+    for (const member of g.sessions) {
+      const status = statuses.get(member.id)
+      if (visiblePendingKind(status?.pendingInteraction?.kind) !== undefined) pendingInteraction = true
+      if ((status?.running ?? member.running) || (descendants.get(member.id)?.runningCount ?? 0) > 0) running = true
+      if (status?.completionUnread === true) completedUnread = true
+    }
     groups.push({
       key: g.key,
       workspaceId: g.workspaceId,
@@ -360,6 +375,9 @@ export function deriveGroups(
       sessionCount: g.sessions.length,
       expanded,
       containsCurrent: g.key === currentGroup,
+      running,
+      completedUnread,
+      pendingInteraction,
       sessions: expanded
         ? g.sessions.map(session => sessionNode(session, descendants, statuses, activeSchedules))
         : [],

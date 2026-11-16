@@ -1,6 +1,8 @@
 /**
- * Read-only git access: a scrubbed, time-limited spawn plus pure parsers for
- * the porcelain output the plugin relies on. Nothing here writes to a repository.
+ * Git access: a scrubbed, time-limited spawn plus pure parsers for the
+ * porcelain output the plugin relies on. Everything is read-only except
+ * {@link addWorktree}, {@link removeWorktree}, {@link deleteBranch} and
+ * {@link renameCurrentBranch} — the plugin's only writes into a repository.
  */
 import { spawn } from 'node:child_process'
 import { realpath, stat } from 'node:fs/promises'
@@ -169,4 +171,77 @@ export async function listWorktrees(cwd: string, options?: GitRunOptions): Promi
   const result = await runGit(['worktree', 'list', '--porcelain'], cwd, options)
   if (result.code !== 0) throw new Error(result.stderr.trim() || `git worktree list exited with ${result.code}`)
   return parseWorktreePorcelain(result.stdout)
+}
+
+/** Every local branch name of the repository containing `cwd`, short form. */
+export async function listBranches(cwd: string, options?: GitRunOptions): Promise<string[]> {
+  const result = await runGit(['branch', '--list', '--format=%(refname:short)'], cwd, options)
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `git branch exited with ${result.code}`)
+  return result.stdout.split('\n').map(line => line.trim()).filter(line => line !== '')
+}
+
+/** True when `name` is legal as a new branch name; blank input is invalid. */
+export async function isValidBranchName(cwd: string, name: string, options?: GitRunOptions): Promise<boolean> {
+  if (name.trim() === '') return false
+  const result = await runGit(['check-ref-format', '--branch', name], cwd, options)
+  return result.code === 0
+}
+
+/** One `git worktree add`: check out an existing branch, or grow a new one from `base`. */
+export interface WorktreeAddRequest {
+  /** Target directory; must not exist. */
+  readonly path: string
+  /** Branch to check out, or to create when `create` is set. */
+  readonly branch: string
+  /** Grow a new branch (`worktree add -b`); false checks the existing branch out. */
+  readonly create: boolean
+  /** Start point for a new branch; omitted uses the cwd worktree's HEAD. */
+  readonly base?: string | undefined
+}
+
+/**
+ * The plugin's single write into a repository. `cwd` should be the main
+ * worktree so an omitted `base` resolves to its HEAD. A nonzero exit is a
+ * normal result: git itself refuses a branch another worktree already holds,
+ * and that stderr is the user-facing error.
+ */
+export async function addWorktree(cwd: string, request: WorktreeAddRequest, options?: GitRunOptions): Promise<GitResult> {
+  const args = request.create
+    ? ['worktree', 'add', '-b', request.branch, request.path, ...(request.base === undefined ? [] : [request.base])]
+    : ['worktree', 'add', request.path, request.branch]
+  return runGit(args, cwd, options)
+}
+
+/** True when the worktree at `cwd` has uncommitted changes (tracked or untracked). */
+export async function isDirty(cwd: string, options?: GitRunOptions): Promise<boolean> {
+  const result = await runGit(['status', '--porcelain'], cwd, options)
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `git status exited with ${result.code}`)
+  return result.stdout.trim() !== ''
+}
+
+/**
+ * True when `tip` is fully contained in `base`, i.e. every commit it names is
+ * already reachable from `base`. Exit code 1 is "not merged"; anything worse
+ * (unknown refs included) throws.
+ */
+export async function isMerged(cwd: string, tip: string, base: string, options?: GitRunOptions): Promise<boolean> {
+  const result = await runGit(['merge-base', '--is-ancestor', tip, base], cwd, options)
+  if (result.code === 0) return true
+  if (result.code === 1) return false
+  throw new Error(result.stderr.trim() || `git merge-base exited with ${result.code}`)
+}
+
+/** `git worktree remove`; `force` also drops a dirty worktree. */
+export async function removeWorktree(cwd: string, path: string, force: boolean, options?: GitRunOptions): Promise<GitResult> {
+  return runGit(['worktree', 'remove', ...(force ? ['--force'] : []), path], cwd, options)
+}
+
+/** `git branch -d` (merged only) or `-D` (drop regardless): remove a local branch no worktree holds. */
+export async function deleteBranch(cwd: string, branch: string, force: boolean, options?: GitRunOptions): Promise<GitResult> {
+  return runGit(['branch', force ? '-D' : '-d', branch], cwd, options)
+}
+
+/** Rename the branch checked out in the worktree at `cwd` (`git branch -m`). */
+export async function renameCurrentBranch(cwd: string, name: string, options?: GitRunOptions): Promise<GitResult> {
+  return runGit(['branch', '-m', name], cwd, options)
 }

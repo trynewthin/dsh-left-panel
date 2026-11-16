@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const runtimeRoot = await mkdtemp(join(tmpdir(), 'dsh-left-panel-demo-'))
@@ -52,6 +53,107 @@ async function createRepository(name, branches) {
     await git(['-C', mainPath, 'worktree', 'add', '-q', '-b', branch, worktreePath])
   }
   return realpath(mainPath)
+}
+
+// A mock OpenAI-compatible endpoint so demo sessions actually run (and the
+// left panel's status indicators have something to show): every chat request
+// gets a ~1k-line reply streamed over a few seconds.
+const mockModelId = 'mock-1k'
+const mockReply = Array.from({ length: 40 }, (_, index) =>
+  `Line ${index + 1}: this is a fixed-length mock response for the left-panel demo.`,
+).join(' ')
+
+function mockCompletion(stream) {
+  if (!stream) {
+    return JSON.stringify({
+      id: 'chatcmpl-mock',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: mockModelId,
+      choices: [{ index: 0, message: { role: 'assistant', content: mockReply }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 400, total_tokens: 500 },
+    })
+  }
+  const chunk = (delta, finishReason = null) => `data: ${JSON.stringify({
+    id: 'chatcmpl-mock',
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model: mockModelId,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  })}\n\n`
+  return chunk
+}
+
+function startMockLlm(port) {
+  const words = mockReply.split(' ')
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost')
+    if (url.pathname.endsWith('/models') && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ object: 'list', data: [{ id: mockModelId, object: 'model', created: 0, owned_by: 'mock' }] }))
+      return
+    }
+    if (url.pathname.endsWith('/chat/completions') && req.method === 'POST') {
+      const chunks = []
+      req.on('data', (part) => chunks.push(part))
+      req.on('end', async () => {
+        let parsed = {}
+        try { parsed = JSON.parse(Buffer.concat(chunks).toString() || '{}') } catch { /* keep default */ }
+        if (!parsed.stream) {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(mockCompletion(false))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+        const chunk = mockCompletion(true)
+        res.write(chunk({ role: 'assistant' }))
+        for (let index = 0; index < words.length; index += 8) {
+          res.write(chunk({ content: words.slice(index, index + 8).join(' ') + ' ' }))
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        res.write(chunk({}, 'stop'))
+        res.end('data: [DONE]\n\n')
+      })
+      return
+    }
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'not found', type: 'invalid_request_error' } }))
+  })
+  server.unref()
+  return new Promise((resolve) => {
+    server.once('error', () => resolve(false))
+    server.listen(port, '127.0.0.1', () => resolve(true))
+  })
+}
+
+/** Point the demo profile at the mock endpoint so sessions can run without a real API key. */
+async function configureMockProvider(port) {
+  // The template file is the comments plus a bare `[]` patch list — replace
+  // the empty list with the provider entries (appending would split the
+  // document into two top-level values).
+  const patchFile = join(runtimeRoot, 'profiles', profileName, 'cordis.patch.yml')
+  const template = await readFile(patchFile, 'utf8')
+  const entries = `- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      mock:
+        displayName: Mock LLM
+        apiKeyEnv: MOCK_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:${port}/v1
+        models:
+          - id: ${mockModelId}
+            name: ${mockModelId}
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: mock
+    model: ${mockModelId}
+`
+  const patched = template.replace(/\[\]\s*$/, entries)
+  if (patched === template) throw new Error('unexpected cordis.patch.yml layout')
+  await writeFile(patchFile, patched)
 }
 
 async function rpc(baseUrl, cookie, route, method, payload) {
@@ -118,11 +220,16 @@ function cleanup() {
 try {
   await runDsh(['--profile', profileName, '--from-default-profile', 'web', '--dump-config'], { quiet: true })
   await runDsh(['plugin', '--profile', profileName, 'add', '-w', repositoryRoot], { quiet: true })
+  const mockPort = Number(process.env.DEMO_MOCK_PORT ?? '9701')
+  if (!(await startMockLlm(mockPort))) {
+    console.warn(`mock LLM port ${mockPort} already in use; reusing the existing listener`)
+  }
+  await configureMockProvider(mockPort)
   const atlas = await createRepository('atlas', ['feature/search', 'fix/layout'])
   const orbit = await createRepository('orbit', ['feature/auth'])
-  const invocation = dshCommand(['--profile', profileName, '--no-open', '--host', '127.0.0.1', '--port', '0'])
+  const invocation = dshCommand(['--profile', profileName, '--no-open', '--host', '127.0.0.1', '--port', process.env.DEMO_PORT ?? '0'])
   server = spawn(invocation.command, invocation.args, {
-    env: { ...process.env, DSH_HOME: runtimeRoot },
+    env: { ...process.env, DSH_HOME: runtimeRoot, MOCK_API_KEY: 'mock-key' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const baseUrl = await new Promise((resolve, reject) => {

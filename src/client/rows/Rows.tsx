@@ -219,8 +219,10 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   group: GroupNode
   onToggle: () => void
   onCreate: () => void
-  /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete?: (() => void) | undefined } | undefined
+  /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown).
+   * `renameBranch` is offered only on worktree rows sitting on a branch.
+   * `deleteDisabled` keeps the delete item visible but inert (main worktree). */
+  actions?: { rename: () => void; renameBranch?: (() => void) | undefined; delete?: (() => void) | undefined; deleteDisabled?: boolean | undefined } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -233,14 +235,26 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
   const active = group.expanded && group.containsCurrent
+  const status = groupPrimaryStatus(row, t)
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    { id: 'rename', label: nested ? t('worktree.rename.display') : t('rename'), icon: <IconEditOutlineRegular /> },
+    ...(nested && actions?.renameBranch !== undefined ? [
+      { id: 'rename-branch', label: t('worktree.rename.branch'), icon: <IconBranchOutlineRegular /> },
+    ] : []),
     ...(nested && row.cwd !== undefined ? [
       { id: 'copy-path', label: t('menu.copyAbsolutePath'), icon: <IconCopyOutlineRegular /> },
     ] : []),
     ...(actions?.delete === undefined ? [] : [
-      { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
+      {
+        id: 'delete',
+        label: t('delete.workspace'),
+        icon: <IconTrashOutlineRegular />,
+        danger: true,
+        ...(actions.deleteDisabled === true
+          ? { disabled: true, disabledReason: t('delete.workspace.main') }
+          : {}),
+      },
     ]),
   ]
   const ownRow = (
@@ -271,6 +285,15 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
       </span>
+      {/* Trailing aggregate status: a branch stays locatable while its
+          sessions are folded away. It sits left of the hover-only actions,
+          which slide in beside it without displacing it. */}
+      {status !== undefined && (
+        <span className={css.slot} title={status.label}>
+          <StateDot state={status.state} />
+          <span className={css.visuallyHidden}>{status.label}</span>
+        </span>
+      )}
       <span className={css.rowActions}>
         {actions !== undefined && (
           <Menu
@@ -285,6 +308,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
                 })
               }
               if (id === 'rename') actions.rename()
+              if (id === 'rename-branch') actions.renameBranch?.()
               if (id === 'delete') actions.delete?.()
             }}
             portal
@@ -361,13 +385,14 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, onRestore, drag, home, t }: {
+export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, onRestore, onCreateWorktree, drag, home, t }: {
   section: RepoSection
   onToggle: () => void
   onRefresh: () => void
   onRename: () => void
   onDelete: () => void
   onRestore: (path: string) => void
+  onCreateWorktree: () => void
   /** Present when the node can be reordered among the other sections. */
   drag?: WorkspaceRowDragProps | undefined
   home?: string | undefined
@@ -384,6 +409,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, 
   // continuous, so this cell speaks only when a scan failed.
   const menuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    { id: 'create-worktree', label: t('repo.menu.newWorktree'), icon: <IconBranchOutlineRegular /> },
     { id: 'refresh', label: t('repo.menu.refresh'), icon: <IconRefreshOutlineRegular /> },
     { id: 'delete', label: t('delete.repository'), icon: <IconTrashOutlineRegular />, danger: true },
     ...(deletedBranchItems.length === 0 ? [] : [{
@@ -425,6 +451,7 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, 
           items={menuItems}
           onSelect={(id) => {
             setMenuOpen(false)
+            if (id === 'create-worktree') onCreateWorktree()
             if (id === 'rename') onRename()
             if (id === 'refresh') onRefresh()
             if (id === 'delete') onDelete()
@@ -510,6 +537,18 @@ function sessionStatuses(
   if (subagents !== undefined) return [subagents]
   if (node.completed) return [{ state: 'done', label: t('status.completed') }]
   return [{ state: 'done', label: t('status.idle') }]
+}
+
+/**
+ * One workspace group's aggregate status, mirroring a session row's primary
+ * status: pending interaction outranks live activity, which outranks the
+ * finished-but-unviewed reminder. Nothing renders when every member is idle.
+ */
+function groupPrimaryStatus(group: GroupNode, t: RowTranslate): SessionStatus | undefined {
+  if (group.pendingInteraction) return { state: 'warning', label: t('status.waitingApproval') }
+  if (group.running) return { state: 'ongoing', label: t('status.running') }
+  if (group.completedUnread) return { state: 'done', label: t('status.completed') }
+  return undefined
 }
 
 /** Primary status dot plus every status's screen-reader label, shared by the search and session rows. */

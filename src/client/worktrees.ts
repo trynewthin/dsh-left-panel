@@ -8,7 +8,11 @@ import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 
-import { CHANNEL, methodOf, type Endpoint, type WorktreeSnapshot } from '../protocol.ts'
+import {
+  CHANNEL, methodOf,
+  type BranchOptions, type CreateWorktreeRequest, type DeleteWorkspaceRequest, type Endpoint, type RenameBranchRequest,
+  type WorktreeSnapshot,
+} from '../protocol.ts'
 
 export const EMPTY_SNAPSHOT: WorktreeSnapshot = { repos: [], workspaceRepo: {}, syncedAt: 0 }
 
@@ -19,12 +23,20 @@ export interface WorktreeActions {
   setRepoName(repoKey: string, name: string): Promise<void>
   /** Rename a worktree Workspace; title conflicts are scoped to its repository. */
   setWorkspaceTitle(workspaceId: string, title: string): Promise<void>
-  /** Remove any Workspace registration — ordinary directory or worktree — and retain a restorable tombstone. */
-  deleteWorkspace(workspaceId: string): Promise<void>
+  /** Remove any Workspace registration — ordinary directory or worktree — and retain a restorable tombstone.
+   * `deleteBranch` also removes the worktree directory and its branch (no tombstone); a dirty
+   * worktree or unmerged branch is rejected with `left-panel/unsafe-delete` until `force` is set. */
+  deleteWorkspace(workspaceId: string, options?: Pick<DeleteWorkspaceRequest, 'deleteBranch' | 'force'>): Promise<void>
   /** Remove every registered Workspace of one repository, tombstoning its worktrees first. */
   deleteRepository(repoKey: string): Promise<void>
   /** Re-register a tombstoned worktree path and reattach its sessions. */
   restoreWorkspace(path: string): Promise<void>
+  /** The choices the new-worktree dialog offers: unchecked-out branches, base, sibling directories. */
+  branchOptions(repoKey: string): Promise<BranchOptions>
+  /** Create a worktree under a repository; reconciliation registers it like a manual `git worktree add`. */
+  createWorktree(request: CreateWorktreeRequest): Promise<void>
+  /** Rename the git branch a worktree has checked out; a branch-mirroring title follows. */
+  renameBranch(workspaceId: string, branch: string): Promise<void>
 }
 
 export interface WorktreeClient {
@@ -73,9 +85,16 @@ export function createWorktreeClient(connection: ConnectionHandle, workspaces: I
       refresh: () => call('sync'),
       setRepoName: (repoKey, name) => call('setRepoName', { repoKey, name }),
       setWorkspaceTitle: (workspaceId, title) => call('setWorkspaceTitle', { workspaceId, title }),
-      deleteWorkspace: workspaceId => call('deleteWorkspace', { workspaceId }),
+      deleteWorkspace: (workspaceId, options) => call('deleteWorkspace', { workspaceId, ...options } satisfies DeleteWorkspaceRequest),
       deleteRepository: repoKey => call('deleteRepository', { repoKey }),
       restoreWorkspace: path => call('restoreWorkspace', { path }),
+      branchOptions: async (repoKey) => {
+        const result = await connection.rpc.call(CHANNEL, methodOf('branchOptions'), { repoKey })
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+        return result.value as BranchOptions
+      },
+      createWorktree: request => call('createWorktree', request),
+      renameBranch: (workspaceId, branch) => call('renameBranch', { workspaceId, branch } satisfies RenameBranchRequest),
     },
     start() {
       refresh()

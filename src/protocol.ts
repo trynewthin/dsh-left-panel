@@ -28,15 +28,26 @@ export const ENDPOINT_PREFIX = 'left-panel'
  * - `deleteWorkspace`: remove any Workspace record — an ordinary directory or any worktree of a
  *   scanned repository, the main worktree included — while retaining its directory and sessions;
  *   a worktree path also keeps a durable tombstone so reconciliation cannot recreate it. Adding the
- *   directory back by hand clears only that path's tombstone.
+ *   directory back by hand clears only that path's tombstone. With `deleteBranch` a non-main worktree
+ *   is also removed from disk (`git worktree remove`) and its branch deleted, leaving no tombstone;
+ *   a dirty worktree or unmerged branch is rejected until `force` is passed (the dialog's second
+ *   confirmation).
  * - `deleteRepository`: remove every registered Workspace of one repository in a single operation,
  *   tombstoning all of its scanned worktrees first.
  * - `restoreWorkspace`: clear that tombstone and register the unchanged worktree directory again.
+ * - `branchOptions`: the choices the new-worktree dialog offers — local branches not checked out,
+ *   the new-branch start point, and the sibling directories already in use. Answers a
+ *   {@link BranchOptions} rather than a snapshot; it is the one read endpoint that touches git.
+ * - `createWorktree`: run `git worktree add` for one repository — checking an existing branch out
+ *   or growing a new one — then reconcile so the new worktree registers like a manual `git` add.
+ * - `renameBranch`: rename the git branch checked out in a worktree (`git branch -m`); a Workspace
+ *   title that still mirrors the old branch name follows the rename.
  */
-export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle' | 'deleteWorkspace' | 'deleteRepository' | 'restoreWorkspace'
+export type Endpoint = 'list' | 'sync' | 'setRepoName' | 'setWorkspaceTitle' | 'deleteWorkspace' | 'deleteRepository' | 'restoreWorkspace' | 'branchOptions' | 'createWorktree' | 'renameBranch'
 
 export const ENDPOINTS: readonly Endpoint[] = [
   'list', 'sync', 'setRepoName', 'setWorkspaceTitle', 'deleteWorkspace', 'deleteRepository', 'restoreWorkspace',
+  'branchOptions', 'createWorktree', 'renameBranch',
 ]
 
 /** The method name the browser passes to `connection.rpc.call`; also the route path below {@link CHANNEL}. */
@@ -103,3 +114,43 @@ export interface SetRepoNameRequest { readonly repoKey: string; readonly name: s
 
 /** Worktree Workspace title mutation; duplicate titles are rejected only within its repository. */
 export interface SetWorkspaceTitleRequest { readonly workspaceId: string; readonly title: string }
+
+/** Workspace removal; the extras apply only to a non-main worktree sitting on a branch. */
+export interface DeleteWorkspaceRequest {
+  readonly workspaceId: string
+  /** Also `git worktree remove` the directory and delete its branch; no tombstone is kept. */
+  readonly deleteBranch?: boolean | undefined
+  /** Second-confirmation acknowledgement: drop uncommitted changes and unmerged commits too. */
+  readonly force?: boolean | undefined
+}
+
+/** Rename the branch checked out in a worktree. */
+export interface RenameBranchRequest {
+  readonly workspaceId: string
+  /** New short branch name; must pass `git check-ref-format` and not collide with an existing branch. */
+  readonly branch: string
+}
+
+/** The choices the new-worktree dialog offers for one repository. */
+export interface BranchOptions {
+  readonly repoKey: string
+  /** Local branch names not checked out in any of the repository's worktrees. */
+  readonly availableBranches: readonly string[]
+  /** Start point a new branch grows from (the main worktree's checked-out branch or short hash). */
+  readonly base: string
+  /** Parent directories the repository's worktrees already live in, the main worktree's first. */
+  readonly parents: readonly string[]
+  /** Basename of the main worktree directory; the path suggestion's name prefix. */
+  readonly dirName: string
+}
+
+/** Create one worktree under a repository: check out `branch`, or grow it when unknown. */
+export interface CreateWorktreeRequest {
+  readonly repoKey: string
+  /** Branch to check out, or to create when no local branch of that name exists. */
+  readonly branch: string
+  /** Absolute directory to create the worktree at; must not exist. */
+  readonly path: string
+  /** Start point for a new branch; defaults to the repository's main-worktree HEAD. */
+  readonly base?: string | undefined
+}

@@ -8,8 +8,8 @@
  * - a registered linked worktree that git no longer lists, or whose directory
  *   is gone, is deleted once it has been gone for {@link REMOVAL_GRACE_MS};
  * - the main worktree is never deleted automatically;
- * - a worktree Workspace still carrying the title the plugin gave it follows
- *   its branch; a user-renamed one is left alone;
+ * - display names are decoupled from branches: a title assigned at create —
+ *   derived or user-renamed — never follows a later branch rename;
  * - an ignored path whose worktree disappears from git is released so a future
  *   worktree at that path is picked up again.
  */
@@ -112,11 +112,6 @@ export function planSync(
         if (!present) {
           if (!worktree.main) consider(worktree.path, repo.key, registered.id, 'directory-missing')
           continue
-        }
-        const title = worktreeTitle(worktree)
-        const assigned = memory.autoTitles.get(worktree.path)
-        if (assigned !== undefined && registered.title === assigned && title !== assigned) {
-          actions.push({ type: 'retitle', path: worktree.path, workspaceId: registered.id, title })
         }
         continue
       }

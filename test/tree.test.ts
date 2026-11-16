@@ -20,6 +20,9 @@ function group(workspaceId: string, label: string, cwd: string, containsCurrent 
     sessionCount: 0,
     expanded: true,
     containsCurrent,
+    running: false,
+    completedUnread: false,
+    pendingInteraction: false,
     sessions: [],
   }
 }
