@@ -12,7 +12,6 @@
   },
   "files": [
     "lib",
-    "demo",
     "docs/ui-demo.png",
     "cordis.patch.yml",
     "README.md",
