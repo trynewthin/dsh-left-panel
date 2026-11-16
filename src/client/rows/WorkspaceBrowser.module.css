@@ -421,22 +421,39 @@
   padding-left: 14px;
 }
 
-/* Optional tree guides (view option): in the 14px indent gutter each worktree
-   section gets an elbow into its branch row; all but the last sibling keep a
-   vertical run continuing past the row's midpoint — a plain ├/└ texture, no
-   arrows. Painted as backgrounds so row drop-marker pseudo-elements keep
-   working. */
+/* Optional tree guides (view option): each worktree section draws a rounded
+   elbow from a vertical run at x15.5 — aligned under the project row's folder
+   icon (8px row padding + half of the 16px icon slot) — into its branch row.
+   ::before reaches 9px above the section so the first elbow meets the folder
+   icon and later elbows bridge the 2px sibling gap; ::after extends the run
+   2px past the bottom so the line never breaks between siblings. The last
+   sibling has no ::after, so its elbow is the closing └. The marker rules
+   below are .groupSection-qualified so they keep priority during drags. */
 .treeGuides .nestedSection {
-  background-image:
-    linear-gradient(var(--dsw-alias-border-l4) 0 0),
-    linear-gradient(var(--dsw-alias-border-l4) 0 0);
-  background-repeat: no-repeat;
-  background-position: 5px 0, 5px 15px;
-  background-size: 1px 15px, 9px 1px;
+  position: relative;
 }
 
-.treeGuides .nestedSection:not(:last-child) {
-  background-size: 1px 100%, 9px 1px;
+.treeGuides .nestedSection::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: -9px;
+  width: 7px;
+  height: 24px;
+  border-left: 1px solid var(--dsw-alias-border-l4);
+  border-bottom: 1px solid var(--dsw-alias-border-l4);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+
+.treeGuides .nestedSection:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: -9px;
+  bottom: -2px;
+  border-left: 1px solid var(--dsw-alias-border-l4);
+  pointer-events: none;
 }
 
 .nestedSection + .nestedSection {
@@ -444,8 +461,8 @@
 }
 
 .listTopDropIndicator,
-.workspaceDropBefore::before,
-.workspaceDropAfter::after {
+.groupSection.workspaceDropBefore::before,
+.groupSection.workspaceDropAfter::after {
   content: '';
   position: absolute;
   z-index: 1;
@@ -483,11 +500,11 @@
   display: none;
 }
 
-.workspaceDropBefore::before {
+.groupSection.workspaceDropBefore::before {
   top: -8px;
 }
 
-.workspaceDropAfter::after {
+.groupSection.workspaceDropAfter::after {
   bottom: -8px;
 }
 
