@@ -332,6 +332,8 @@ type SessionTreeProps = Pick<
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
   onSessionRevealed: (sessionId: SessionId) => void
+  /** Request the tree to expand and reveal the owning session row (active list jumps). */
+  onSessionRevealRequest?: ((sessionId: SessionId) => void) | undefined
 }
 
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
@@ -343,7 +345,7 @@ function SessionTree({
   insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, snapshot, worktrees,
+  revealSessionId, onSessionRevealed, onSessionRevealRequest, snapshot, worktrees,
   projectAreas, onProjectAreaRenameRequest, onProjectAreaDissolve, onRepoProjectAreaChange,
   onProjectAreaOrderChange,
 }: SessionTreeProps) {
@@ -922,7 +924,10 @@ function SessionTree({
                 node={node}
                 currentId={current}
                 now={now}
-                onOpen={open}
+                onOpen={(id) => {
+                  onSessionRevealRequest?.(id)
+                  open(id)
+                }}
                 onRename={onSessionRename}
                 onFork={forkSession}
                 onArchive={onSessionArchive}
@@ -1853,6 +1858,7 @@ export function WorkspaceBrowser({
                 showActiveSessions={showActiveSessions}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
+                onSessionRevealRequest={setRevealSessionId}
                 home={home}
                 t={t}
                 snapshot={snapshot}
