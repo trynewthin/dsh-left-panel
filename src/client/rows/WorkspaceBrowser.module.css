@@ -353,12 +353,14 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* The pinned "active sessions" jump list leads the tree with a quiet label. */
+/* The pinned "active sessions" jump list leads the tree; its label matches
+   the project-area heading text style. */
 .activeHeader {
-  padding: 0 8px 2px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
+  padding: 0 8px 0 3px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 30px;
+  color: var(--dsw-alias-label-primary);
 }
 
 /* One workspace section: header row + a compact expanded session run. */
