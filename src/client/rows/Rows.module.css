@@ -218,6 +218,18 @@
   from { opacity: 0; }
 }
 
+/* Pulse-emphasize a session row right after a jump navigation reveals it. */
+@keyframes flashRow {
+  0%   { background: transparent; }
+  25%  { background: var(--dsw-alias-interactive-bg-hover); box-shadow: inset 3px 0 0 var(--dsw-alias-state-business-primary); }
+  70%  { background: var(--dsw-alias-interactive-bg-hover); box-shadow: inset 3px 0 0 var(--dsw-alias-state-business-primary); }
+  100% { background: transparent; }
+}
+
+.sessionRowFlash {
+  animation: flashRow 1.8s ease-out;
+}
+
 .slot {
   flex: none;
   width: 16px;

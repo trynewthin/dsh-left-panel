@@ -338,6 +338,8 @@ type SessionTreeProps = Pick<
   onSessionRevealed: (sessionId: SessionId) => void
   /** Request the tree to expand and reveal the owning session row (active list jumps). */
   onSessionRevealRequest?: ((sessionId: SessionId) => void) | undefined
+  /** Session row to pulse-emphasize right after a jump (clears on its own timer). */
+  flashSessionId?: SessionId | undefined
 }
 
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
@@ -349,7 +351,7 @@ function SessionTree({
   insertWorkspaceBefore, insertSessionBefore, orderBy, showActiveSessions, activeSessionsCollapsed, onActiveSessionsToggle, activeSchedules,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, onSessionRevealRequest, snapshot, worktrees,
+  revealSessionId, onSessionRevealed, onSessionRevealRequest, flashSessionId, snapshot, worktrees,
   projectAreas, onProjectAreaRenameRequest, onProjectAreaDissolve, onRepoProjectAreaChange,
   onProjectAreaOrderChange,
 }: SessionTreeProps) {
@@ -475,10 +477,23 @@ function SessionTree({
     [sections, orderBy, recencyByGroup],
   )
   const warnRejected = (what: string) => (reason: unknown): void => { console.warn(`${what} rejected:`, reason) }
+  const areaByRepo = new Map<string, string>()
+  for (const area of projectAreas) {
+    for (const repoKey of area.repoKeys) if (!areaByRepo.has(repoKey)) areaByRepo.set(repoKey, area.id)
+  }
   useEffect(() => {
-    if (revealGroup === undefined || groupExpansion[revealGroup] === true) return
-    setGroupExpanded(revealGroup, true)
-  }, [groupExpansion, revealGroup, setGroupExpanded])
+    if (revealGroup === undefined) return
+    // Unfold every ancestor of the revealed row: the workspace group itself,
+    // its repo section, and the project area holding that repo — the jump must
+    // always land on a visibly expanded location.
+    const repoKey = snapshot.workspaceRepo[revealGroup as string]
+    const keys = [revealGroup as string,
+      ...(repoKey === undefined ? [] : [repoGroupKey(repoKey)]),
+      ...(repoKey === undefined || areaByRepo.get(repoKey) === undefined
+        ? [] : [projectAreaExpansionKey(areaByRepo.get(repoKey) as string)]),
+    ]
+    for (const key of keys) if (groupExpansion[key] !== true) setGroupExpanded(key, true)
+  }, [groupExpansion, revealGroup, setGroupExpanded, snapshot, areaByRepo])
   useEffect(() => {
     if (revealSessionId === undefined || revealGroup === undefined) return
     const group = groups.find(candidate => candidate.key === revealGroup)
@@ -727,6 +742,7 @@ function SessionTree({
               onReveal={node.id === revealSessionId && group.key === revealGroup
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
+              flash={node.id === flashSessionId}
               drag={dragProps}
               t={t}
             />
@@ -746,10 +762,6 @@ function SessionTree({
         )}
       </div>
     )
-  }
-  const areaByRepo = new Map<string, string>()
-  for (const area of projectAreas) {
-    for (const repoKey of area.repoKeys) if (!areaByRepo.has(repoKey)) areaByRepo.set(repoKey, area.id)
   }
   const sectionsByArea = new Map(projectAreas.map(area => [area.id, [] as TreeSection[]]))
   const defaultSections: TreeSection[] = []
@@ -933,10 +945,10 @@ function SessionTree({
                 onActiveSessionsToggle()
               }}
             >
+              <span className={css.activeHeaderName}>{t('activeSessions.label')}</span>
               <span className={css.activeChevron}>
                 <IconTriangleRightFillRegular className={clsx(css.activeArrow, !activeSessionsCollapsed && css.activeArrowOpen)} />
               </span>
-              <span className={css.activeHeaderName}>{t('activeSessions.label')}</span>
             </div>
             {!activeSessionsCollapsed && activeSessions.map(node => (
               <SessionNodeItem
@@ -1300,6 +1312,16 @@ export function WorkspaceBrowser({
   const [query, setQuery] = useState('')
   const [searchExpanded, setSearchExpanded] = useState(false)
   const [revealSessionId, setRevealSessionId] = useState<SessionId | undefined>(undefined)
+  // Flash is decoupled from the reveal ack: the row keeps pulsing ~2s after
+  // it has been scrolled into view, so the user can spot its real location.
+  const [flashSessionId, setFlashSessionId] = useState<SessionId | undefined>(undefined)
+  const flashTimer = useRef<number | undefined>(undefined)
+  const requestSessionReveal = (sessionId: SessionId): void => {
+    setRevealSessionId(sessionId)
+    setFlashSessionId(sessionId)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => { setFlashSessionId(undefined) }, 2000)
+  }
   const normalizedQuery = sanitizeSearchQuery(query).trim()
   const [remoteSearch, setRemoteSearch] = useState<RemoteSearchState>({
     query: '',
@@ -1882,7 +1904,8 @@ export function WorkspaceBrowser({
                 onActiveSessionsToggle={() => { actions.setActiveSessionsCollapsed(!activeSessionsCollapsed) }}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
-                onSessionRevealRequest={setRevealSessionId}
+                onSessionRevealRequest={requestSessionReveal}
+                flashSessionId={flashSessionId}
                 home={home}
                 t={t}
                 snapshot={snapshot}

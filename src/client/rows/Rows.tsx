@@ -720,7 +720,7 @@ export function SearchResultItem({ result, currentId, onOpen, onRename, onFork, 
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false, t,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false, flash = false, t,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -738,6 +738,8 @@ export function SessionNodeItem({
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
   flat?: boolean | undefined
+  /** Pulse-highlight the row after a jump navigation revealed it. */
+  flash?: boolean | undefined
   t: RowTranslate
 }) {
   const row = node
@@ -761,6 +763,7 @@ export function SessionNodeItem({
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         flat && !showStatus && css.flatSessionRowWithoutStatus,
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
+        flash && css.sessionRowFlash,
       )}
       role="treeitem"
       aria-selected={selected}
