@@ -376,12 +376,20 @@
   white-space: nowrap;
 }
 
+/* Matches the project-area header: the fold chevron hugs the label's right
+   side and only appears while the header is hovered. */
 .activeChevron {
-  display: inline-flex;
+  display: none;
   flex: none;
-  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+  margin-left: 4px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+.activeHeader:hover .activeChevron { display: inline-flex; }
 
 .activeArrow {
   transition: transform 150ms var(--ds-ease-in-out);
