@@ -1,64 +1,66 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  Button, IconBranchOutlineRegular, IconFolderCloseRegular, IconPlusOutlineRegular,
-  IconTriangleRightFillRegular, Menu, Modal,
+  Button, IconBranchOutlineRegular, IconChevronDownOutlineRegular, IconFolderCloseRegular, IconPlusOutlineRegular, Menu, Modal,
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
 import type { GroupedWorkspacePickerProps } from './contract/slots.ts'
-import { visibleWorkspacePickerEntries, workspacePickerEntries } from './workspace-picker-tree.ts'
+import { workspacePickerEntries } from './workspace-picker-tree.ts'
 import css from './GroupedWorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
-const TOGGLE_PROJECT = '::toggle-project:'
 
 /** Repository-aware replacement for the New Session Workspace picker. */
 export function GroupedWorkspacePicker({
-  open, anchorRef, useWorkspaces, useWorktrees, selectedId, onPick, onClose,
+  open, useWorkspaces, useWorktrees, selectedId, onPick, onClose,
   createWorkspace, pickDirectory, t,
 }: GroupedWorkspacePickerProps) {
-  const workspaceSnapshot = useWorkspaces(state => state)
-  const workspaces = workspaceSnapshot.items
+  const workspaces = useWorkspaces(state => state.items)
   const snapshot = useWorktrees(state => state)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set())
-  const allEntries = workspacePickerEntries(workspaces, snapshot)
-  const selectedRepoKey = selectedId === undefined ? undefined : snapshot.workspaceRepo[selectedId as string]
-  const selectedProjectId = selectedRepoKey === undefined ? undefined : `repo:${selectedRepoKey}`
-  useEffect(() => {
-    if (!open || selectedProjectId === undefined) return
-    setExpandedProjects((current) => {
-      if (current.has(selectedProjectId)) return current
-      return new Set([...current, selectedProjectId])
-    })
-  }, [open, selectedProjectId])
-  const visibleEntries = visibleWorkspacePickerEntries(allEntries, expandedProjects)
+  const [menu, setMenu] = useState<'project' | 'branch' | null>(null)
+  const options = useMemo(() => snapshot.syncedAt === 0 ? [] : workspacePickerEntries(workspaces, snapshot), [workspaces, snapshot])
+  const projects = options.filter(entry => entry.kind === 'project')
+  const directories = options.filter(entry => entry.kind === 'workspace')
+  const repoKey = selectedId === undefined ? undefined : snapshot.workspaceRepo[selectedId]
+  const project = repoKey === undefined ? undefined : projects.find(entry => entry.id === `repo:${repoKey}`)
+  const directory = directories.find(entry => entry.workspace.workspaceId === selectedId)
+  const branch = project?.branches.find(entry => entry.workspaceId === selectedId)
+  const scopeName = project?.name ?? directory?.workspace.title
+  const projectMenuOpen = menu === 'project' || (open && menu !== 'branch')
+  const branchMenuOpen = menu === 'branch' && project !== undefined
+
+  const closeProjectMenu = (): void => {
+    setMenu(current => current === 'project' ? null : current)
+    if (open) onClose()
+  }
+  const closeBranchMenu = (): void => {
+    setMenu(current => current === 'branch' ? null : current)
+  }
   const entries: MenuEntry[] = snapshot.syncedAt === 0
     ? [{ type: 'label', id: '::loading', text: t('picker.loading') }]
-    : visibleEntries.map((entry) => {
-    if (entry.kind === 'project') {
-      const expanded = expandedProjects.has(entry.id)
-      return {
-        id: `${TOGGLE_PROJECT}${entry.id}`,
-        label: (
-          <span className={css.projectLabel}>
-            <span className={css.projectName}>{entry.name}</span>
-            <IconTriangleRightFillRegular className={expanded ? css.projectArrowExpanded : css.projectArrow} />
-          </span>
-        ),
-      }
-    }
-    return {
-      id: entry.workspace.workspaceId as string,
-      label: entry.nested
-        ? <span className={css.nestedLabel}>{entry.workspace.title}</span>
-        : entry.workspace.title,
-      icon: entry.nested ? <IconBranchOutlineRegular size={16} /> : <IconFolderCloseRegular size={16} />,
-      disabled: busy,
-    }
-    })
+    : [
+        ...(projects.length === 0 ? [] : [
+          { type: 'label' as const, id: '::projects', text: t('picker.project') },
+          ...projects.map(entry => ({
+            id: entry.id,
+            label: entry.name,
+            icon: <IconFolderCloseRegular size={16} />,
+            disabled: busy || entry.branches.length === 0,
+          })),
+        ]),
+        ...(directories.length === 0 ? [] : [
+          { type: 'label' as const, id: '::directories', text: t('picker.directories') },
+          ...directories.map(({ workspace }) => ({
+            id: workspace.workspaceId,
+            label: workspace.title,
+            icon: <IconFolderCloseRegular size={16} />,
+            disabled: busy,
+          })),
+        ]),
+      ]
   const addEntries: MenuEntry[] = [{
     id: ADD_WORKSPACE,
     label: t('picker.addWorkspace'),
@@ -66,7 +68,7 @@ export function GroupedWorkspacePicker({
     disabled: busy,
   }]
   const chooseDirectory = (): void => {
-    onClose()
+    closeProjectMenu()
     setBusy(true)
     setError(null)
     pickDirectory().then((path) => {
@@ -76,31 +78,85 @@ export function GroupedWorkspacePicker({
       setError(reason instanceof Error ? reason.message : String(reason))
     }).finally(() => { setBusy(false) })
   }
+  const pickProject = (id: string): void => {
+    if (id === ADD_WORKSPACE) {
+      chooseDirectory()
+      return
+    }
+    closeProjectMenu()
+    const target = projects.find(entry => entry.id === id)
+    if (target === undefined) {
+      onPick(id as WorkspaceId)
+    } else if (target.id !== project?.id) {
+      const defaultBranch = target.branches.find(entry => entry.main) ?? target.branches[0]
+      if (defaultBranch !== undefined) onPick(defaultBranch.workspaceId)
+    }
+  }
   return (
     <>
-      <Menu
-        open={open}
-        anchor={null}
-        items={entries.length === 0 ? addEntries : entries}
-        {...entries.length === 0 ? {} : { footer: addEntries }}
-        selectedId={selectedId}
-        onSelect={(id) => {
-          if (id.startsWith(TOGGLE_PROJECT)) {
-            const projectId = id.slice(TOGGLE_PROJECT.length)
-            setExpandedProjects((current) => {
-              const next = new Set(current)
-              if (next.has(projectId)) next.delete(projectId)
-              else next.add(projectId)
-              return next
-            })
-          } else if (id === ADD_WORKSPACE) chooseDirectory()
-          else onPick(id as WorkspaceId)
-        }}
-        onClose={onClose}
-        side="bottom"
-        portal
-        anchorRef={anchorRef}
-      />
+      <div className={css.pickerControls}>
+        <Menu
+          open={projectMenuOpen}
+          anchor={(
+            <Button
+              type="button" size="sm" className={css.pickerButton}
+              icon={<IconFolderCloseRegular size={16} />}
+              aria-label={scopeName === undefined ? t('picker.project') : t('picker.project.selected', { name: scopeName })}
+              aria-haspopup="menu" aria-expanded={projectMenuOpen}
+              onClick={() => {
+                if (projectMenuOpen) closeProjectMenu()
+                else setMenu('project')
+              }}
+            >
+              <span className={css.entryName}>{scopeName ?? t('picker.project')}</span>
+              <IconChevronDownOutlineRegular className={css.chevron} size={12} />
+            </Button>
+          )}
+          items={entries.length === 0 ? addEntries : entries}
+          {...entries.length === 0 ? {} : { footer: addEntries }}
+          selectedId={project?.id ?? selectedId}
+          onSelect={pickProject}
+          onClose={closeProjectMenu}
+          portal
+        />
+        {project !== undefined && (
+          <Menu
+            open={branchMenuOpen}
+            anchor={(
+              <Button
+                type="button" size="sm" className={css.pickerButton}
+                icon={<IconBranchOutlineRegular size={16} />}
+                aria-label={branch === undefined ? t('picker.branch') : t('picker.branch.selected', { name: branch.name })}
+                aria-haspopup="menu" aria-expanded={branchMenuOpen}
+                onClick={() => {
+                  if (branchMenuOpen) closeBranchMenu()
+                  else {
+                    closeProjectMenu()
+                    setMenu('branch')
+                  }
+                }}
+              >
+                <span className={css.entryName}>{branch?.name ?? t('picker.branch')}</span>
+                <IconChevronDownOutlineRegular className={css.chevron} size={12} />
+              </Button>
+            )}
+            items={project.branches.length === 0
+              ? [{ type: 'label', id: '::no-branches', text: t('picker.branches.empty') }]
+              : project.branches.map(entry => ({
+                id: entry.workspaceId,
+                label: entry.name,
+                icon: <IconBranchOutlineRegular size={16} />,
+              }))}
+            selectedId={selectedId}
+            onSelect={(id) => {
+              closeBranchMenu()
+              if (id !== selectedId) onPick(id as WorkspaceId)
+            }}
+            onClose={closeBranchMenu}
+            portal
+          />
+        )}
+      </div>
       <Modal
         open={error !== null}
         onClose={() => { setError(null) }}

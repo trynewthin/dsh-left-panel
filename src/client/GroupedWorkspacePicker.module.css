@@ -1,35 +1,31 @@
-.nestedLabel {
+.entryName {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.projectLabel {
-  display: flex;
+/* The slot follows the native chip, with an outlet wrapper in some runtimes. */
+button[aria-haspopup='menu']:has(+ .pickerControls, + * > .pickerControls) {
+  display: none;
+}
+
+.pickerControls {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  width: 100%;
   min-width: 0;
-  font-weight: 600;
+  max-width: 100%;
+  gap: 4px;
 }
 
-.projectName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.pickerButton {
+  max-width: min(180px, 36vw);
 }
 
-.projectArrow,
-.projectArrowExpanded {
+.chevron {
   flex: none;
-  margin-left: 6px;
   color: var(--dsw-alias-label-tertiary);
-  transition: transform 150ms var(--ds-ease-in-out);
-}
-
-.projectArrowExpanded {
-  transform: rotate(90deg);
 }
 
 .modalAction {

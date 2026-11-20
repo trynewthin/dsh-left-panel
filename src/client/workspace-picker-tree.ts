@@ -1,52 +1,49 @@
-import type { WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
 import type { WorktreeSnapshot } from '../protocol.ts'
 
-export type WorkspacePickerEntry =
-  | { readonly kind: 'project'; readonly id: string; readonly name: string }
-  | { readonly kind: 'workspace'; readonly workspace: WorkspaceView; readonly nested: boolean }
+interface WorkspacePickerBranch {
+  readonly name: string
+  readonly workspaceId: WorkspaceId
+  readonly main: boolean
+}
 
-/** Fold the durable Workspace order into project headings and their worktrees. */
+interface WorkspacePickerProject {
+  readonly kind: 'project'
+  readonly id: string
+  readonly name: string
+  readonly branches: WorkspacePickerBranch[]
+}
+
+export type WorkspacePickerEntry =
+  | WorkspacePickerProject
+  | { readonly kind: 'workspace'; readonly workspace: WorkspaceView }
+
+/** Offer registered, checked-out branches in Workspace order. */
 export function workspacePickerEntries(
   workspaces: readonly WorkspaceView[],
   snapshot: WorktreeSnapshot,
 ): WorkspacePickerEntry[] {
-  const repoByKey = new Map(snapshot.repos.map(repo => [repo.key, repo]))
-  const emitted = new Set<string>()
+  const repositories = new Map(snapshot.repos.map(repo => [repo.key, repo]))
+  const projects = new Map<string, WorkspacePickerProject>()
   const entries: WorkspacePickerEntry[] = []
   for (const workspace of workspaces) {
-    const repoKey = snapshot.workspaceRepo[workspace.workspaceId as string]
-    const repo = repoKey === undefined ? undefined : repoByKey.get(repoKey)
+    const repoKey = snapshot.workspaceRepo[workspace.workspaceId]
+    const repo = repoKey === undefined ? undefined : repositories.get(repoKey)
     if (repo === undefined) {
-      entries.push({ kind: 'workspace', workspace, nested: false })
+      entries.push({ kind: 'workspace', workspace })
       continue
     }
-    if (emitted.has(repoKey)) continue
-    emitted.add(repoKey)
-    entries.push({ kind: 'project', id: `repo:${repoKey}`, name: repo.name })
-    for (const member of workspaces) {
-      if (snapshot.workspaceRepo[member.workspaceId as string] === repoKey) {
-        entries.push({ kind: 'workspace', workspace: member, nested: true })
-      }
+    let project = projects.get(repo.key)
+    if (project === undefined) {
+      project = { kind: 'project', id: `repo:${repo.key}`, name: repo.name, branches: [] }
+      projects.set(repo.key, project)
+      entries.push(project)
+    }
+    const checkout = repo.worktrees.find(worktree => worktree.workspaceId === workspace.workspaceId)
+    if (checkout?.branch && checkout.exists && !checkout.bare && !checkout.prunable && !checkout.detached) {
+      project.branches.push({ name: checkout.branch, workspaceId: workspace.workspaceId, main: checkout.main })
     }
   }
   return entries
-}
-
-/** Keep project headings while hiding nested worktrees of folded projects. */
-export function visibleWorkspacePickerEntries(
-  entries: readonly WorkspacePickerEntry[],
-  expandedProjectIds: ReadonlySet<string>,
-): WorkspacePickerEntry[] {
-  let projectExpanded = true
-  const visible: WorkspacePickerEntry[] = []
-  for (const entry of entries) {
-    if (entry.kind === 'project') {
-      projectExpanded = expandedProjectIds.has(entry.id)
-      visible.push(entry)
-      continue
-    }
-    if (!entry.nested || projectExpanded) visible.push(entry)
-  }
-  return visible
 }

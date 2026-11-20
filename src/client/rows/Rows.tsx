@@ -21,7 +21,7 @@ import {
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
-import type { GroupNode, RepoSection, SearchResultNode, SessionNode } from '../tree.ts'
+import type { GroupNode, RepoSection, SearchResultNode, SessionBranch, SessionNode } from '../tree.ts'
 import css from './Rows.module.css'
 
 /** The standard locale seat, prop-passed from the browser root. */
@@ -70,23 +70,6 @@ function WorkspaceHoverContent({ label, cwd, createdAt, t }: {
       <div className={css.hoverTime}>{createdLabel(createdAt, t)}</div>
     </div>
   )
-}
-
-/**
- * Row drag wiring supplied by the tree owner. `drop` reports the half of the
- * row where the pointer released so the owner can resolve an insert anchor.
- */
-export interface RowDragProps {
-  /** Start dragging this row. */
-  start: () => void
-  /** A compatible row drag is in flight. */
-  active: boolean
-  /** Current marker on this row: insert line above, below, or none. */
-  marker: 'before' | 'after' | null
-  /** Report the hovered half while a compatible drag passes over this row. */
-  hover: (half: 'before' | 'after') => void
-  drop: (half: 'before' | 'after') => void
-  end: () => void
 }
 
 /** Drag lifecycle for reordering complete custom project sections. */
@@ -380,6 +363,7 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * rows beneath it — and its menu drives the plugin's per-repository sync.
  * @param props.section - derived repository section.
  * @param props.onToggle - expand/collapse the repository.
+ * @param props.onCreateSession - start a session in the repository's main worktree.
  * @param props.onRefresh - reconcile this repository's worktrees now.
  * @param props.onRename - open the browser-owned rename dialog for this repository.
  * @param props.drag - optional node-row drag wiring (moves the whole repository block).
@@ -387,9 +371,10 @@ function RepoHoverContent({ section, home, t }: { section: RepoSection; home: st
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, onRestore, onCreateWorktree, drag, home, t }: {
+export function RepoRowItem({ section, onToggle, onCreateSession, onRefresh, onRename, onDelete, onRestore, onCreateWorktree, drag, home, t }: {
   section: RepoSection
   onToggle: () => void
+  onCreateSession?: (() => void) | undefined
   onRefresh: () => void
   onRename: () => void
   onDelete: () => void
@@ -446,6 +431,16 @@ export function RepoRowItem({ section, onToggle, onRefresh, onRename, onDelete, 
         <span className={css.title}>{repo.name}</span>
       </span>
       {repo.error !== undefined && <span className={clsx(css.repoMeta, css.repoMetaError)}>!</span>}
+      {onCreateSession !== undefined && (
+        <button
+          type="button"
+          className={clsx(css.iconButton, css.repoCreateButton)}
+          aria-label={t('actions.newSession.aria', { name: repo.name })}
+          onClick={(event) => { event.stopPropagation(); onCreateSession() }}
+        >
+          <IconPlusOutlineRegular />
+        </button>
+      )}
       <span className={css.rowActions}>
         <Menu
           open={menuOpen}
@@ -580,21 +575,37 @@ function ActiveScheduleIndicator({ t, search = false }: { t: RowTranslate; searc
   )
 }
 
-/** Hover-card body: full title, relative time, and every relevant live status. */
-function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number; t: RowTranslate }) {
+/** Hover-card body: full title, checkout, relative time, and live status. */
+function SessionHoverContent({ node, now, branch, t }: {
+  node: SessionNode
+  now: number
+  branch: SessionBranch | undefined
+  t: RowTranslate
+}) {
   const statuses = sessionStatuses(node, t)
   return (
-    <div className={css.hoverContent}>
+    <div className={clsx(css.hoverContent, css.sessionHover)}>
       <div className={css.hoverTitle}>{displayTitle(node, t)}</div>
-      {/* Same placeholder rule as the row's trailing cell: no timestamp
-          before the first prompt. */}
-      {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
-      {statuses.map(status => (
-        <div className={css.hoverStatus} key={status.label}>
-          <StateDot state={status.state} />
-          <span>{status.label}</span>
+      {branch !== undefined && (
+        <div className={css.hoverBranch}>
+          <span className={css.visuallyHidden}>{t('session.branch.label')}</span>
+          <IconBranchOutlineRegular size={14} />
+          <span className={css.hoverBranchName}>
+            {branch.name ?? (branch.detachedCommit === undefined
+              ? t('session.branch.unknown')
+              : t('session.branch.detached', { commit: branch.detachedCommit }))}
+          </span>
         </div>
-      ))}
+      )}
+      <div className={css.hoverFooter}>
+        {statuses.map(status => (
+          <div className={css.hoverStatus} key={status.label}>
+            <StateDot state={status.state} />
+            <span>{status.label}</span>
+          </div>
+        ))}
+        {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
+      </div>
     </div>
   )
 }
@@ -714,13 +725,13 @@ export function SearchResultItem({ result, currentId, onOpen, onRename, onFork, 
  * @param props.onFork - fork a session at its last completed turn.
  * @param props.onArchive - archive a session by id.
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
- * @param props.drag - optional draggable-row wiring.
  * @param props.flat - omit the empty status slot in the hierarchy-free flat list.
+ * @param props.branch - owning Workspace's current Git branch, shown in project view.
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false, flash = false, t,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, flat = false, flash = false, branch, t,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -734,12 +745,11 @@ export function SessionNodeItem({
   onArchive: (id: SessionNode['id']) => void
   /** Scroll this row into view after search navigation, then acknowledge it. */
   onReveal?: (() => void) | undefined
-  /** Present only on draggable rows (workspace-group sessions outside search). */
-  drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
   flat?: boolean | undefined
   /** Pulse-highlight the row after a jump navigation revealed it. */
   flash?: boolean | undefined
+  branch?: SessionBranch | undefined
   t: RowTranslate
 }) {
   const row = node
@@ -762,36 +772,11 @@ export function SessionNodeItem({
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         flat && !showStatus && css.flatSessionRowWithoutStatus,
-        drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
         flash && css.sessionRowFlash,
       )}
       role="treeitem"
       aria-selected={selected}
       onClick={() => { onOpen(node.id) }}
-      draggable={drag !== undefined}
-      onDragStart={drag === undefined
-        ? undefined
-        : (e) => {
-          e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setData('text/plain', node.id)
-          drag.start()
-        }}
-      onDragEnd={drag?.end}
-      onDragOver={drag === undefined
-        ? undefined
-        : (e) => {
-          if (!drag.active) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          drag.hover(rowHalf(e))
-        }}
-      onDrop={drag === undefined
-        ? undefined
-        : (e) => {
-          if (!drag.active) return
-          e.preventDefault()
-          drag.drop(rowHalf(e))
-        }}
     >
       {/* Pending interaction and own or descendant activity outrank the
           finished-but-unviewed reminder, which returns after activity stops
@@ -814,11 +799,8 @@ export function SessionNodeItem({
   return (
     <HoverCard
       anchor={ownRow}
-      content={<SessionHoverContent node={node} now={now} t={t} />}
-      disabled={menuOpen || drag?.active === true}
-      copyText={row.blank ? undefined : row.title}
-      copyLabel={t('copy')}
-      copiedLabel={t('hover.copied')}
+      content={<SessionHoverContent node={node} now={now} branch={branch} t={t} />}
+      disabled={menuOpen}
     />
   )
 }

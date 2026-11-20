@@ -15,24 +15,17 @@ import type { ProjectArea } from './project-areas.ts'
 
 export type { ProjectArea } from './project-areas.ts'
 
-/** Browser-local order account for the hierarchy-free flat Session list. */
-export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
-
-/** Session-list grouping mode: workspace sections or one flat recency list. */
-export type SessionGroupBy = 'workspace' | 'flat'
-/** Session order: user-arranged only, or user-arranged plus activity promotion. */
-export type SessionOrderBy = 'manual' | 'updated'
+/** Session-list grouping mode: worktree sections, projects, or one flat list. */
+export type SessionGroupBy = 'workspace' | 'project' | 'flat'
+/** Order of projects within each area. */
+export type ProjectOrderBy = 'manual' | 'updated'
 
 /** Workspace browser viewing state persisted across surface remounts and reloads. */
 type WorkspaceViewState = {
   groupBy: SessionGroupBy
-  orderBy: SessionOrderBy
+  projectOrderBy: ProjectOrderBy
   /** Explicit zero-or-five-session state keyed by Workspace group identity. */
   groupExpansion: Record<string, boolean>
-  /** Shared editable order per Workspace group plus the browser-local flat-list account. */
-  sessionOrderByAccount: Record<string, string[]>
-  /** Last observed update timestamps per order account for one-time promotion events. */
-  sessionUpdatedAtByAccount: Record<string, Record<string, number>>
   /** Optional visual grouping layered above repository nodes. */
   projectAreas: ProjectArea[]
   /** Pin a "活跃会话" section of running/pending/unread sessions at the top of the tree. */
@@ -49,19 +42,12 @@ type WorkspaceViewState = {
  */
 type WorkspaceViewActions = {
   setGroupBy: (draft: WorkspaceViewState, mode: SessionGroupBy) => void
-  setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy) => void
+  setProjectOrderBy: (draft: WorkspaceViewState, mode: ProjectOrderBy) => void
   setShowActiveSessions: (draft: WorkspaceViewState, show: boolean) => void
   setActiveSessionsCollapsed: (draft: WorkspaceViewState, collapsed: boolean) => void
   setTreeGuides: (draft: WorkspaceViewState, show: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
-  retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
-  syncSessionOrderAccount: (
-    draft: WorkspaceViewState,
-    accountKey: string,
-    order: string[],
-    updatedAt: Record<string, number>,
-  ) => void
-  setSessionOrder: (draft: WorkspaceViewState, accountKey: string, order: string[]) => void
+  retainExpansionKeys: (draft: WorkspaceViewState, keys: readonly string[]) => void
   createProjectArea: (draft: WorkspaceViewState, id: string, name: string) => void
   renameProjectArea: (draft: WorkspaceViewState, id: string, name: string) => void
   dissolveProjectArea: (draft: WorkspaceViewState, id: string) => void
@@ -75,7 +61,7 @@ const PERSIST_V2 = 'dsh-left-panel.workspace.view.v2'
 /**
  * Carry the v1 persisted document forward: the persist key is the storage
  * identity, so swapping keys wholesale would drop every user's section
- * layout, expansion state and session order. The only intentional change is
+ * layout and expansion state. The only intentional change in this migration is
  * showActiveSessions, which v2 makes the default; everything else survives.
  * Runs before defineStore so the engine hydrates from the migrated document.
  */
@@ -102,10 +88,8 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
   return defineStore({
     init: (): WorkspaceViewState => ({
       groupBy: 'workspace',
-      orderBy: 'updated',
+      projectOrderBy: 'manual',
       groupExpansion: {},
-      sessionOrderByAccount: {},
-      sessionUpdatedAtByAccount: {},
       projectAreas: [],
       showActiveSessions: true,
       activeSessionsCollapsed: false,
@@ -117,29 +101,16 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
     persist: PERSIST_V2,
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
-      setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },
+      setProjectOrderBy: (d, mode: ProjectOrderBy) => { d.projectOrderBy = mode },
       setShowActiveSessions: (d, show: boolean) => { d.showActiveSessions = show },
       setActiveSessionsCollapsed: (d, collapsed: boolean) => { d.activeSessionsCollapsed = collapsed },
       setTreeGuides: (d, show: boolean) => { d.treeGuides = show },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
-      retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
-        const retained = new Set(workspaceKeys)
+      retainExpansionKeys: (d, keys: readonly string[]) => {
+        const retained = new Set(keys)
         d.groupExpansion = Object.fromEntries(
           Object.entries(d.groupExpansion).filter(([key]) => retained.has(key)),
         )
-        d.sessionOrderByAccount = Object.fromEntries(
-          Object.entries(d.sessionOrderByAccount).filter(([key]) => retained.has(key)),
-        )
-        d.sessionUpdatedAtByAccount = Object.fromEntries(
-          Object.entries(d.sessionUpdatedAtByAccount).filter(([key]) => retained.has(key)),
-        )
-      },
-      syncSessionOrderAccount: (d, accountKey: string, order: string[], updatedAt: Record<string, number>) => {
-        d.sessionOrderByAccount[accountKey] = order
-        d.sessionUpdatedAtByAccount[accountKey] = updatedAt
-      },
-      setSessionOrder: (d, accountKey: string, order: string[]) => {
-        d.sessionOrderByAccount[accountKey] = order
       },
       createProjectArea: (d, id: string, name: string) => {
         d.projectAreas ??= []

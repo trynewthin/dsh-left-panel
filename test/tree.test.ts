@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  arrangeSections, deriveActive, deriveFlat, deriveGroups, deriveSearchResults, planWorkspaceMove,
-  repoGroupKey, workspaceDropAllowed, type GroupNode,
+  arrangeSections, deriveActive, deriveFlat, deriveGroups, deriveProjectSessions, deriveSearchResults, planWorkspaceMove,
+  repoGroupKey, sortProjectsByRecency, workspaceDropAllowed, type GroupNode,
 } from '../src/client/tree.ts'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -146,6 +146,24 @@ test('repository sections expose their workspace ids in durable order', () => {
   assert.deepEqual(section.workspaceIds, ['ws-wt', 'ws-main'], 'durable order, not display order')
 })
 
+test('recent activity sorts project slots only and keeps branch order', () => {
+  const first = repo('/first/.git', [worktree('/first', 'main', 'first-main', true)])
+  const second = repo('/second/.git', [
+    worktree('/second', 'main', 'second-main', true),
+    worktree('/wt/recent', 'recent', 'recent'),
+  ])
+  const sections = arrangeSections([
+    group('first-main', 'main', '/first'),
+    group('plain', 'plain', '/plain'),
+    group('second-main', 'main', '/second'),
+    group('recent', 'recent', '/wt/recent'),
+  ], snapshot([first, second]), {})
+  const sorted = sortProjectsByRecency(sections, new Map([['first-main', 20], ['recent', 30]]))
+  assert.deepEqual(sorted.map(section => section.kind === 'repo' ? section.repo.name : section.group.label),
+    ['second', 'plain', 'first'])
+  assert.equal(sorted[0], sections[2], 'project keeps its existing branch order')
+})
+
 test('planWorkspaceMove reorders a single workspace against the durable order', () => {
   const order = ['a', 'b', 'c']
   assert.deepEqual(planWorkspaceMove(order, ['c'], { ids: ['a'], half: 'before' }), { ids: ['c'], anchor: 'a' })
@@ -219,6 +237,50 @@ function workspaceView(id: string, sessionIds: readonly SessionId[]): WorkspaceV
   }
 }
 
+test('project sessions combine registered worktrees and retain their Git checkout', () => {
+  const main = session('main-session', { updatedAt: 10 })
+  const topic = session('topic-session', { updatedAt: 30 })
+  const archived = session('archived-session')
+  const detached = session('detached-session', { updatedAt: 20 })
+  const ungrouped = session('ungrouped-session')
+  const list = sessionState([main, topic, archived, detached, ungrouped])
+  const workspaces = [
+    workspaceView('main', [main.id]),
+    { ...workspaceView('topic', [topic.id, archived.id]), title: 'Custom workspace title' },
+    workspaceView('detached', [detached.id]),
+  ]
+  const groups = deriveGroups(list, workspaces, [archived.id], new Map(), new Set(), {
+    expandedGroups: ['main', 'topic', 'detached'],
+  })
+  const repository = repo('/repo/.git', [
+    worktree('/repo', 'main', 'main', true),
+    worktree('/wt/topic', 'feature/login', 'topic'),
+    { ...worktree('/wt/detached', 'aaaaaaa', 'detached'), branch: null, detached: true },
+  ])
+  const sections = arrangeSections(groups, snapshot([repository]), {})
+  const project = sections[0]
+  assert.ok(project?.kind === 'repo')
+  const rows = deriveProjectSessions(project)
+  assert.deepEqual(rows.map(row => row.node.id), [topic.id, detached.id, main.id])
+  assert.deepEqual(rows[0]?.branch, {
+    name: 'feature/login', detachedCommit: undefined,
+  })
+  assert.deepEqual(rows[1]?.branch, {
+    name: null, detachedCommit: 'aaaaaaa',
+  })
+})
+
+test('Workspace session order follows update time and ignores the Host membership order', () => {
+  const old = session('old', { updatedAt: 1 })
+  const middle = session('middle', { updatedAt: 2 })
+  const latest = session('latest', { updatedAt: 3 })
+  const list = sessionState([old, latest, middle])
+  const workspaces = [workspaceView('ws', [old.id, middle.id, latest.id])]
+  const groups = deriveGroups(list, workspaces, [], new Map(), new Set(), { expandedGroups: ['ws'] })
+  assert.deepEqual(groups[0]?.sessions.map(row => row.id), [latest.id, middle.id, old.id])
+  assert.deepEqual(workspaces[0]?.sessionIds, [old.id, middle.id, latest.id])
+})
+
 test('a renamed blank Session stays visible with its title after selection moves', () => {
   const ordinary = session('ordinary', { displayTitle: 'Existing work', retainedBy: { mainView: 1 } })
   const named = session('named', { blank: true, title: 'Draft label' })
@@ -227,7 +289,7 @@ test('a renamed blank Session stays visible with its title after selection moves
   const workspaces = [workspaceView('ws', list.ids)]
 
   const groups = deriveGroups(list, workspaces, [], new Map(), new Set(), { expandedGroups: ['ws'] })
-  assert.deepEqual(groups[0]?.sessions.map(row => row.id), ['ordinary', 'named'])
+  assert.deepEqual(groups[0]?.sessions.map(row => row.id), ['named', 'ordinary'])
   const namedRow = groups[0]?.sessions.find(row => row.id === 'named')
   assert.equal(namedRow?.title, 'Draft label')
   assert.equal(namedRow?.blank, true, 'the row still has no turn, so its menu must omit fork')

@@ -99,12 +99,6 @@ export type WorkspaceBrowserInjected = {
    * session clears the selection into the New Session view state.
    */
   archiveSession: (sessionId: SessionId) => Promise<void>
-  /**
-   * Reorder a session inside its Workspace account (DOM-insertBefore
-   * semantics: omitted anchor appends to the end). The view refreshes from
-   * the Host response/changed frame; failures leave the order unchanged.
-   */
-  insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
   /** Open the Host-native directory picker; null when the operator cancels, rejects when no picker is available. */

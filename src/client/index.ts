@@ -22,6 +22,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { GroupedWorkspacePickerInjected, WorkspaceBrowserInjected } from './contract/slots.ts'
 import { GroupedWorkspacePicker } from './GroupedWorkspacePicker.tsx'
 import { en, NS, zh } from './locales.ts'
+import { createProjectReferenceSource, type ProjectReferenceTriggers } from './project-references.ts'
+import { ReferenceNavigation } from './ReferenceNavigation.tsx'
+import type { ReferenceMenuController } from './reference-menu.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { createScheduleCatalogClient } from './schedules.ts'
 import { createWorkspaceViewStore } from './stores.ts'
@@ -55,6 +58,30 @@ export function apply(ctx: Context): void {
 
   const worktrees = createWorktreeClient(connection, workspaces)
   ctx.effect(() => worktrees.start(), 'left-panel: worktree snapshot')
+  ctx.inject(['inputTriggers'], (scope) => {
+    // Older DSH versions can still load the sidebar without this optional service.
+    const triggers = scope.get('inputTriggers') as (ProjectReferenceTriggers & {
+      sessionOf?: (context: Context) => ReferenceMenuController
+    }) | undefined
+    if (triggers === undefined) return
+    const t = scope.locale.bind(NS)
+    scope.effect(() => triggers.registerSource(createProjectReferenceSource(worktrees.source.getSnapshot, {
+      projects: () => t('reference.projects'),
+      worktrees: name => t('reference.worktrees', { name }),
+    })), 'left-panel: project references')
+    scope.slots.inject('conversation.input.overlay', () => scope.slots.register(
+      {
+        name: 'conversation.input.overlay',
+        id: 'left-panel-reference-navigation',
+        locale: NS,
+        inject: (sessionId) => {
+          const session = sessions.scope(sessionId)
+          return { controller: session === undefined ? undefined : triggers.sessionOf?.(session) }
+        },
+      },
+      ReferenceNavigation,
+    ))
+  })
   const schedules = createScheduleCatalogClient(ctx)
   ctx.effect(() => schedules.start(), 'left-panel: schedule catalog')
 
@@ -91,9 +118,6 @@ export function apply(ctx: Context): void {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },
     archiveSession: async (sessionId) => { await uiWorkspace.archiveSession(sessionId) },
-    insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
-      await workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
-    },
     createWorkspace: input => workspaces.create(input),
     pickDirectory: () => uiWorkspace.pickDirectory(),
     worktrees: worktrees.actions,

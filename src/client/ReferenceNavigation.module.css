@@ -1,0 +1,194 @@
+/* The native trigger renderer still handles slash commands in this outlet. */
+[data-composer-overlay]:has(.panel) [data-trigger-menu]:not(.panel) {
+  display: none;
+}
+
+.panel {
+  position: absolute;
+  inset: auto 0 calc(100% + 4px);
+  z-index: 100;
+  display: flex;
+  box-sizing: border-box;
+  height: 50vh;
+  height: 50dvh;
+  padding: 4px;
+  overflow: hidden;
+  border: 0;
+  box-shadow: var(--dsw-elevation-prominent);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+}
+
+.navigation {
+  display: flex;
+  flex: 0 0 61px;
+  flex-direction: column;
+  gap: 2px;
+  padding-inline-end: 4px;
+  border-inline-end: 1px solid var(--dsw-alias-border-l3);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.navigationButton,
+.layoutButton {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 42px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 13px;
+  cursor: pointer;
+}
+
+.navigationButton:disabled {
+  color: var(--dsw-alias-label-tertiary);
+  opacity: .6;
+  cursor: default;
+}
+
+.navigationButton[aria-current],
+.navigationButton:hover:not(:disabled),
+.layoutButton:hover,
+.layoutButton[aria-pressed='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.layoutButton {
+  margin-block-start: auto;
+  min-height: 38px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding-inline-start: 4px;
+}
+
+.viewport {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.section + .section {
+  margin-block-start: 4px;
+}
+
+.empty {
+  padding: 12px 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  border-radius: var(--dsw-radius-md);
+}
+
+.option[aria-selected='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.choice,
+.drill,
+.crumbs button {
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.choice {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--dsw-alias-label-primary);
+  text-align: start;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.icon {
+  display: inline-flex;
+  flex: 0 0 15px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.itemName,
+.description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.description {
+  flex: 0 1 auto;
+  max-width: 54%;
+  margin-inline-start: auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.drill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-inline-end: 4px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.drill:hover,
+.crumbs button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.crumbs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 4px 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.crumbs > * { flex: none; }
+
+.crumbs button {
+  padding: 2px 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.crumbs button:disabled { cursor: default; }

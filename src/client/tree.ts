@@ -74,9 +74,6 @@ export interface SessionNode {
   updatedAt: number
 }
 
-/** Session order selected by the Workspace browser. */
-export type SessionOrderBy = 'manual' | 'updated'
-
 /** One workspace group section: header row facts + visible top-level session rows. */
 export interface GroupNode {
   /** Group key: the workspace id or {@link UNGROUPED_KEY}. */
@@ -130,8 +127,6 @@ export interface SearchResultSet {
 /** Viewing state consumed by the derivation. */
 export interface TreeView {
   expandedGroups: readonly string[]
-  /** Browser-local order for Sessions without a backing Workspace account. */
-  ungroupedOrder?: readonly string[]
 }
 
 interface Group {
@@ -156,9 +151,9 @@ export function workspaceLabel(cwd: string | undefined): string {
 }
 
 /** Recency comparator: newest first, id as the deterministic tiebreak (ids are unique per group). */
-function byRecency(a: SessionSummary, b: SessionSummary): number {
+function byRecency(a: Pick<SessionNode, 'id' | 'updatedAt'>, b: Pick<SessionNode, 'id' | 'updatedAt'>): number {
   if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt
-  return a.id < b.id ? -1 : 1
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
 /**
@@ -166,7 +161,7 @@ function byRecency(a: SessionSummary, b: SessionSummary): number {
  * any explicitly named blank stay visible (a rename is a durable user label,
  * so hiding it on selection change would lose the row). Subagent children use
  * their parent header catalog; archived sessions are visible nowhere, while
- * their accounting slots remain so unarchiving restores position.
+ * their accounting slots remain for when they are unarchived.
  */
 function sessionVisible(session: SessionSummary, current: SessionId | undefined, archived: ReadonlySet<SessionId>): boolean {
   return session.origin !== 'subagent'
@@ -207,52 +202,14 @@ export function activeScheduleSessionIds(
   return active
 }
 
-/** Build one group without projecting session lineage into presentation. */
-function buildGroup(
-  key: string,
-  workspaceId: WorkspaceId | undefined,
-  cwd: string | undefined,
-  createdAt: number | undefined,
-  label: string,
-  members: readonly SessionSummary[],
-  order: 'account' | 'recency',
-): Group {
-  const sessions = [...members]
-  // Real Workspace order comes from sessionIds. Ungrouped falls back to
-  // recency until the browser supplies its persisted local order.
-  if (order === 'recency') sessions.sort(byRecency)
-  return { key, workspaceId, cwd, createdAt, label, sessions }
-}
-
-/** Apply a stored Ungrouped order and append newly loose Sessions by recency. */
-function orderedUngrouped(members: readonly SessionSummary[], stored: readonly string[]): SessionSummary[] {
-  const byId = new Map(members.map(session => [session.id as string, session]))
-  const included = new Set<string>()
-  const ordered: SessionSummary[] = []
-  for (const key of stored) {
-    const session = byId.get(key)
-    if (session === undefined || included.has(key)) continue
-    ordered.push(session)
-    included.add(key)
-  }
-  for (const session of [...members].sort(byRecency)) {
-    if (included.has(session.id)) continue
-    ordered.push(session)
-  }
-  return ordered
-}
-
 /**
- * Group Sessions by Host Workspace: one group per entity in stable Host
- * order, with members resolved from sessionIds in their stored order. Sessions
- * outside every Workspace trail in the browser-local Ungrouped order, which
- * falls back to recency before that order is initialized.
+ * Preserve Host Workspace order and resolve session membership, including
+ * sessions outside every Workspace under Ungrouped.
  */
 function groupByWorkspace(
   list: SessionListState,
   workspaces: readonly WorkspaceView[],
   archived: ReadonlySet<SessionId>,
-  ungroupedOrder: readonly string[] | undefined,
 ): Group[] {
   const current = mainSessionId(list)
   const groups: Group[] = []
@@ -266,25 +223,23 @@ function groupByWorkspace(
       if (!sessionVisible(summary, current, archived)) continue
       members.push(summary)
     }
-    groups.push(buildGroup(
-      workspace.workspaceId, workspace.workspaceId, workspace.path,
-      Date.parse(workspace.createdAt), workspace.title, members, 'account',
-    ))
+    groups.push({
+      key: workspace.workspaceId,
+      workspaceId: workspace.workspaceId,
+      cwd: workspace.path,
+      createdAt: Date.parse(workspace.createdAt),
+      label: workspace.title,
+      sessions: members,
+    })
   }
   const stray = list.ids
     .map(id => list.byId[id])
     .filter((s): s is SessionSummary =>
       s !== undefined && !accounted.has(s.id) && sessionVisible(s, current, archived))
   if (stray.length > 0) {
-    groups.push(buildGroup(
-      UNGROUPED_KEY,
-      undefined,
-      undefined,
-      undefined,
-      '',
-      ungroupedOrder === undefined ? stray : orderedUngrouped(stray, ungroupedOrder),
-      ungroupedOrder === undefined ? 'recency' : 'account',
-    ))
+    groups.push({
+      key: UNGROUPED_KEY, workspaceId: undefined, cwd: undefined, createdAt: undefined, label: '', sessions: stray,
+    })
   }
   return groups
 }
@@ -325,8 +280,8 @@ function sessionNode(
 /**
  * Derive the workspace browser groups with every session as a top-level row.
  *
- * Every group shows; sessions populate under expanded groups in the selected
- * local order. Unnamed blank sessions are excluded except for the selected
+ * Every group shows; sessions populate under expanded groups newest first.
+ * Unnamed blank sessions are excluded except for the selected
  * provisional New Session row, while renamed blank sessions stay visible;
  * archived sessions are excluded everywhere.
  * Content search lives outside this derivation
@@ -355,7 +310,7 @@ export function deriveGroups(
     ? undefined
     : owningGroupKey(workspaces, current)
   const groups: GroupNode[] = []
-  for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
+  for (const g of groupByWorkspace(list, workspaces, archived)) {
     const expanded = expandedGroups.has(g.key)
     let running = false
     let completedUnread = false
@@ -379,7 +334,7 @@ export function deriveGroups(
       completedUnread,
       pendingInteraction,
       sessions: expanded
-        ? g.sessions.map(session => sessionNode(session, descendants, statuses, activeSchedules))
+        ? g.sessions.sort(byRecency).map(session => sessionNode(session, descendants, statuses, activeSchedules))
         : [],
     })
   }
@@ -583,6 +538,44 @@ export interface GroupSection {
 }
 
 export type TreeSection = RepoSection | GroupSection
+
+/** Current Git checkout of the Workspace that owns a session. */
+export interface SessionBranch {
+  name: string | null
+  detachedCommit: string | undefined
+}
+
+/** Combine the visible worktree sessions newest first, keeping their checkout metadata. */
+export function deriveProjectSessions(section: RepoSection): { node: SessionNode; branch: SessionBranch }[] {
+  const rows = new Map<SessionId, { node: SessionNode; branch: SessionBranch }>()
+  const worktrees = new Map(section.repo.worktrees.map(worktree => [worktree.workspaceId, worktree]))
+  for (const group of section.groups) {
+    const worktree = worktrees.get(group.key)
+    const branch: SessionBranch = {
+      name: worktree?.branch ?? null,
+      detachedCommit: worktree?.detached && worktree.head !== '' ? worktree.head.slice(0, 7) : undefined,
+    }
+    for (const node of group.sessions) {
+      if (!rows.has(node.id)) rows.set(node.id, { node, branch })
+    }
+  }
+  return [...rows.values()].sort((a, b) => byRecency(a.node, b.node))
+}
+
+/** Sort projects within one area, keeping other groups and worktree order in place. */
+export function sortProjectsByRecency(
+  sections: readonly TreeSection[],
+  updatedAtByWorkspace: ReadonlyMap<string, number>,
+): TreeSection[] {
+  const projects = sections.flatMap(section => section.kind === 'group' ? [] : [{
+    section,
+    updatedAt: section.workspaceIds.reduce((latest, id) =>
+      Math.max(latest, updatedAtByWorkspace.get(id) ?? -Infinity), -Infinity),
+  }])
+  projects.sort((a, b) => a.updatedAt === b.updatedAt ? 0 : b.updatedAt - a.updatedAt)
+  const ordered = projects.values()
+  return sections.map(section => section.kind === 'repo' ? (ordered.next().value?.section ?? section) : section)
+}
 
 /**
  * Fold worktree Workspace groups under their repository. A repository node
